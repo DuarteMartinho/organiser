@@ -60,7 +60,42 @@ export async function updateSession(request: NextRequest) {
 }
 
 export async function middleware(request: NextRequest) {
-    return await updateSession(request)
+    const response = await updateSession(request)
+
+    const supabase = createServerClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+        {
+            cookies: {
+                get(name: string) {
+                    return request.cookies.get(name)?.value
+                },
+                set(name: string, value: string, options: CookieOptions) {
+                    // Not needed for redirect middleware
+                },
+                remove(name: string, options: CookieOptions) {
+                    // Not needed for redirect middleware
+                },
+            },
+        }
+    )
+
+    const { data: { user } } = await supabase.auth.getUser()
+    const url = request.nextUrl.clone()
+
+    // Redirect authenticated users from home page to dashboard
+    if (user && url.pathname === '/') {
+        url.pathname = '/dashboard'
+        return NextResponse.redirect(url)
+    }
+
+    // Redirect unauthenticated users from dashboard to home
+    if (!user && url.pathname === '/dashboard') {
+        url.pathname = '/'
+        return NextResponse.redirect(url)
+    }
+
+    return response
 }
 
 export const config = {

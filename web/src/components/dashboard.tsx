@@ -69,7 +69,13 @@ export default function Dashboard({ currentUserId }: DashboardProps) {
     }
     
     try {
-      if (userGroups.length === 0) return
+      if (userGroups.length === 0) {
+        // User has no groups, set empty arrays and stop loading
+        setUpcomingMatches([])
+        setPastMatches([])
+        setLoading(false)
+        return
+      }
 
       const { data, error } = await supabase
         .from('matches')
@@ -202,6 +208,11 @@ export default function Dashboard({ currentUserId }: DashboardProps) {
       fetchUserGroups()
     }
   }, [currentUserId, fetchUserGroups])
+
+  useEffect(() => {
+    // Always call fetchMatches when userGroups changes (including when it becomes empty)
+    fetchMatches()
+  }, [userGroups, fetchMatches])
 
   const checkUserInMatch = async (match: DashboardMatch) => {
     try {

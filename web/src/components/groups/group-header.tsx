@@ -2,7 +2,6 @@
 
 import { createClient } from '@/lib/supabase/client'
 import { useState, useEffect, useCallback } from 'react'
-import GroupEditModal from './group-edit-modal'
 
 interface GroupHeaderProps {
   group: {
@@ -25,7 +24,6 @@ interface GroupStats {
 }
 
 export default function GroupHeader({ group, isAdmin, onGroupUpdated }: GroupHeaderProps) {
-  const [isEditing, setIsEditing] = useState(false)
   const [currentGroup, setCurrentGroup] = useState(group)
   const [stats, setStats] = useState<GroupStats>({
     memberCount: 0,
@@ -149,22 +147,8 @@ export default function GroupHeader({ group, isAdmin, onGroupUpdated }: GroupHea
           </div>
 
           <div className="flex items-center gap-3">
-            {isAdmin && (
-              <>
-                <button
-                  onClick={() => setIsEditing(true)}
-                  className="px-4 py-2 text-sm bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 transition-colors"
-                >
-                  Edit Group
-                </button>
-                <button className="px-4 py-2 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors">
-                  Create Match
-                </button>
-              </>
-            )}
-            
             <a
-              href="/"
+              href="/dashboard"
               className="px-4 py-2 text-sm bg-gray-600 text-white rounded-md hover:bg-gray-700 transition-colors"
             >
               Back to Dashboard
@@ -200,15 +184,6 @@ export default function GroupHeader({ group, isAdmin, onGroupUpdated }: GroupHea
           </div>
         </div>
       </div>
-
-      {/* Group Edit Modal */}
-      <GroupEditModal
-        isOpen={isEditing}
-        onClose={() => setIsEditing(false)}
-        group={currentGroup}
-        isAdmin={isAdmin}
-        onGroupUpdated={handleGroupUpdated}
-      />
     </>
   )
 }

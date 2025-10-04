@@ -36,7 +36,11 @@ interface GroupMatchesProps {
   currentUserId: string
 }
 
-export default function GroupMatches({ groupId, isAdmin, currentUserId }: GroupMatchesProps) {
+export default function GroupMatches({ 
+  groupId, 
+  isAdmin, 
+  currentUserId
+}: GroupMatchesProps) {
   const [matches, setMatches] = useState<Match[]>([])
   const [loading, setLoading] = useState(true)
   const [showCreateForm, setShowCreateForm] = useState(false)
@@ -66,7 +70,7 @@ export default function GroupMatches({ groupId, isAdmin, currentUserId }: GroupM
         `)
         .eq('group_id', groupId)
         .order('date_time', { ascending: false }) // Most recent first
-        .limit(20) // Limit to prevent memory issues
+        .limit(50) // Increased limit but still reasonable
 
       if (error) throw error
       setMatches(data || [])
@@ -79,8 +83,20 @@ export default function GroupMatches({ groupId, isAdmin, currentUserId }: GroupM
   }, [groupId, supabase])
 
   useEffect(() => {
-    fetchMatches()
-  }, [fetchMatches])
+    let isMounted = true
+    
+    const loadMatches = async () => {
+      if (isMounted) {
+        await fetchMatches()
+      }
+    }
+    
+    loadMatches()
+    
+    return () => {
+      isMounted = false
+    }
+  }, [groupId]) // Only depend on groupId, not fetchMatches
 
   const now = new Date()
   const upcomingMatches = matches.filter(match => new Date(match.date_time) > now).slice(0, 5)
@@ -111,7 +127,17 @@ export default function GroupMatches({ groupId, isAdmin, currentUserId }: GroupM
 
       {/* Upcoming Matches */}
       <div className="bg-white rounded-lg border shadow-sm p-6">
-        <h3 className="text-lg font-semibold mb-4">Upcoming Matches</h3>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold">Upcoming Matches</h3>
+          {isAdmin && (
+            <button 
+              onClick={() => setShowCreateForm(true)}
+              className="px-4 py-2 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+            >
+              + Create Match
+            </button>
+          )}
+        </div>
         {upcomingMatches.length === 0 ? (
           <p className="text-gray-500 text-sm">No upcoming matches scheduled.</p>
         ) : (

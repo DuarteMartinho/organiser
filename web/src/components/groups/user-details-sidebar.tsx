@@ -59,7 +59,6 @@ export default function UserDetailsSidebar({
     if (!isOpen || !userId) return
 
     setLoading(true)
-    console.log('Fetching user details for:', { userId, groupId })
     
     try {
       // Get user basic info and membership
@@ -230,8 +229,20 @@ export default function UserDetailsSidebar({
   }
 
   useEffect(() => {
-    fetchUserDetails()
-  }, [fetchUserDetails])
+    let isMounted = true
+    
+    const loadUserDetails = async () => {
+      if (isMounted && isOpen && userId) {
+        await fetchUserDetails()
+      }
+    }
+    
+    loadUserDetails()
+    
+    return () => {
+      isMounted = false
+    }
+  }, [isOpen, userId, groupId]) // Only depend on the actual values
 
   if (!isOpen) return null
 

@@ -32,6 +32,7 @@ CREATE TABLE groups (
 CREATE TABLE group_admins (
     group_id UUID REFERENCES groups(id) ON DELETE CASCADE,
     user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    created_at TIMESTAMP DEFAULT NOW(),
     PRIMARY KEY(group_id, user_id)
 );
 
@@ -165,6 +166,9 @@ CREATE INDEX idx_player_match_stats_team_player_id ON player_match_stats(team_pl
 
 -- Create the new index:
 -- CREATE INDEX idx_match_players_match_id ON match_players(match_id);
+
+-- Add created_at column to group_admins table:
+-- ALTER TABLE group_admins ADD COLUMN created_at TIMESTAMP DEFAULT NOW();
 
 -- =========================
 -- 11. Sample Data (Optional)

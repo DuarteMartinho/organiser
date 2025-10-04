@@ -8,7 +8,7 @@ export default async function GroupsPage() {
   const { data: { user } } = await supabase.auth.getUser()
   
   if (!user) {
-    redirect('/auth')
+    redirect('/')
   }
 
   return <GroupsPageClient userId={user.id} />

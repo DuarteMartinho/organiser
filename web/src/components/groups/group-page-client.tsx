@@ -119,6 +119,7 @@ export default function GroupPageClient({
             <div className="space-y-6">
               <GroupAdminTab
                 group={group}
+                isAdmin={isAdmin}
                 isOwner={userId === groupOwnerId}
                 onGroupUpdated={handleGroupUpdated}
               />

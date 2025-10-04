@@ -84,7 +84,7 @@ export default function GroupsPageClient({ userId }: GroupsPageClientProps) {
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
               <Link 
-                href="/" 
+                href="/dashboard" 
                 className="text-blue-600 hover:text-blue-800 font-medium"
               >
                 ← Dashboard
@@ -147,7 +147,7 @@ export default function GroupsPageClient({ userId }: GroupsPageClientProps) {
         <div className="bg-white rounded-lg border shadow-sm p-6 mb-8">
           {activeTab === 'myGroups' && (
             <div>
-              <GroupsList />
+              <GroupsList onTabChange={setActiveTab} />
             </div>
           )}
 

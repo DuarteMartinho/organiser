@@ -61,7 +61,7 @@ export default async function GroupPage({ params }: GroupPageProps) {
           <h1 className="text-2xl font-bold text-gray-900 mb-2">Access Denied</h1>
           <p className="text-gray-600 mb-4">You are not a member of this group.</p>
           <a 
-            href="/"
+            href="/dashboard"
             className="text-blue-600 hover:text-blue-800 underline"
           >
             Return to Dashboard
@@ -84,12 +84,12 @@ export default async function GroupPage({ params }: GroupPageProps) {
   // Get the group owner (first admin chronologically)
   const { data: ownerData } = await supabase
     .from('group_admins')
-    .select('user_id')
+    .select('user_id, created_at')
     .eq('group_id', id)
-    .order('user_id', { ascending: true })
+    .order('created_at', { ascending: true })
     .limit(1)
     .single()
-
+  
   const groupOwnerId = ownerData?.user_id
 
   return (

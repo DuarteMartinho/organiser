@@ -14,7 +14,11 @@ interface Group {
   isOwner?: boolean
 }
 
-export default function GroupsList() {
+interface GroupsListProps {
+  onTabChange?: (tab: 'create' | 'join') => void
+}
+
+export default function GroupsList({ onTabChange }: GroupsListProps) {
   const [groups, setGroups] = useState<Group[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedGroup, setSelectedGroup] = useState<string | null>(null)
@@ -104,10 +108,16 @@ export default function GroupsList() {
             Create or join a group to start organizing football matches
           </p>
           <div className="flex justify-center gap-3">
-            <button className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors">
+            <button 
+              onClick={() => onTabChange?.('create')}
+              className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+            >
               Create Group
             </button>
-            <button className="px-4 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700 transition-colors">
+            <button 
+              onClick={() => onTabChange?.('join')}
+              className="px-4 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700 transition-colors"
+            >
               Join Group
             </button>
           </div>
