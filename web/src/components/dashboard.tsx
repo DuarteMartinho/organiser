@@ -260,8 +260,16 @@ export default function Dashboard({ currentUserId }: DashboardProps) {
           {/* Left Column - Matches */}
           <div className="lg:col-span-2 space-y-6">
             {/* Upcoming Matches */}
-            <div>
-              <h2 className="text-xl font-semibold text-gray-900 mb-4">Upcoming Matches</h2>
+            <div className="bg-white rounded-lg border shadow-sm p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold">Upcoming Matches</h3>
+                <a
+                  href="/groups"
+                  className="text-sm text-blue-600 hover:text-blue-700"
+                >
+                  View All
+                </a>
+              </div>
               {upcomingMatches.length === 0 ? (
                 <div className="bg-white rounded-lg border shadow-sm p-6">
                   <p className="text-gray-500 text-center">No upcoming matches in your groups.</p>
@@ -283,8 +291,16 @@ export default function Dashboard({ currentUserId }: DashboardProps) {
 
             {/* Past Matches */}
             {pastMatches.length > 0 && (
-              <div>
-                <h2 className="text-xl font-semibold text-gray-900 mb-4">Recent Matches</h2>
+              <div className="bg-white rounded-lg border shadow-sm p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-semibold">Recent Matches</h3>
+                  <a
+                    href="/groups"
+                    className="text-sm text-blue-600 hover:text-blue-700"
+                  >
+                    View All
+                  </a>
+                </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {pastMatches.map((match) => (
                     <DashboardMatchCard 
@@ -296,21 +312,6 @@ export default function Dashboard({ currentUserId }: DashboardProps) {
                     />
                   ))}
                 </div>
-              </div>
-            )}
-
-            {upcomingMatches.length === 0 && pastMatches.length === 0 && (
-              <div className="bg-white rounded-lg border shadow-sm p-8 text-center">
-                <h3 className="text-lg font-medium text-gray-900 mb-2">No matches found</h3>
-                <p className="text-gray-600 mb-4">
-                  You&apos;re not a member of any groups yet, or your groups haven&apos;t scheduled any matches.
-                </p>
-                <a 
-                  href="/groups" 
-                  className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
-                >
-                  Browse Groups
-                </a>
               </div>
             )}
           </div>
@@ -534,7 +535,7 @@ function GroupsSection({ currentUserId }: { currentUserId: string }) {
         </div>
       ) : (
         <div className="space-y-3">
-          {userGroups.slice(0, 5).map((membership: any) => (
+          {userGroups.slice(0, 3).map((membership: any) => (
             <div key={membership.groups.id} className="p-3 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">
               <div className="flex items-center justify-between">
                 <div className="flex-1 min-w-0">
@@ -566,27 +567,18 @@ function GroupsSection({ currentUserId }: { currentUserId: string }) {
             </div>
           ))}
           
-          {userGroups.length > 5 && (
+          {userGroups.length > 3 && (
             <div className="text-center pt-2">
                 <a
                 href="/groups"
                 className="text-sm text-blue-600 hover:text-blue-700"
               >
-                View {userGroups.length - 5} more groups &rarr;
+                View {userGroups.length - 3} more groups &rarr;
               </a>
             </div>
           )}
         </div>
       )}
-
-      <div className="mt-4 pt-4 border-t border-gray-200">
-        <a
-          href="/groups/create"
-          className="w-full flex items-center justify-center px-4 py-2 border border-gray-300 rounded-md text-sm text-gray-700 hover:bg-gray-50 transition-colors"
-        >
-          + Create New Group
-        </a>
-      </div>
     </div>
   )
 }
