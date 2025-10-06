@@ -24,8 +24,20 @@
         ],
         "baseUrl": ".",
         "paths": {
+            "@/services/*": [
+                "./services/*"
+            ],
+            "@/types/*": [
+                "./types/*"
+            ],
             "@/*": [
                 "./src/*"
+            ],
+            "@actions/*": [
+                "./actions/*"
+            ],
+            "@/db/*": [
+                "./db/*"
             ]
         }
     },
