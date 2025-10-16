@@ -1,18 +1,16 @@
 'use client'
 
-import { createClient } from '@/lib/supabase/client'
 import { useState, useEffect, useCallback } from 'react'
 import UserDetailsSidebar from './user-details-sidebar'
+import { fetchGuestsAction } from '@/actions/guests/fetch-guests'
+import { addGuestAction } from '@/actions/guests/add-guest'
+import { useToast } from '@/hooks/useToast'
 
 interface Guest {
-  group_id: string
-  user_id: string
-  joined_at: string
-  users: {
-    name: string
-    email: string
-  }
-  isAdmin: boolean
+  id: string
+  name: string
+  email: string
+  joinedAt: Date | null
 }
 
 interface GuestManagerProps {
@@ -24,6 +22,7 @@ interface GuestManagerProps {
 }
 
 export default function GuestManager({ groupId, isAdmin, currentUserId, groupOwnerId, onGuestAdded }: GuestManagerProps) {
+  const toast = useToast()
   const [isOpen, setIsOpen] = useState(false)
   const [guestName, setGuestName] = useState('')
   const [loading, setLoading] = useState(false)
@@ -32,7 +31,6 @@ export default function GuestManager({ groupId, isAdmin, currentUserId, groupOwn
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null)
   const [mounted, setMounted] = useState(false)
   const [searchTerm, setSearchTerm] = useState('')
-  const supabase = createClient()
 
   useEffect(() => {
     setMounted(true)
@@ -42,72 +40,15 @@ export default function GuestManager({ groupId, isAdmin, currentUserId, groupOwn
     try {
       if (!groupId) return
 
-      // Get basic member data
-      const { data: basicMembers, error: basicError } = await supabase
-        .from('group_members')
-        .select('group_id, user_id, joined_at')
-        .eq('group_id', groupId)
-        .order('joined_at', { ascending: true })
-        .limit(100)
-
-      if (basicError) throw basicError
-
-      if (!basicMembers || basicMembers.length === 0) {
-        setGuests([])
-        return
-      }
-
-      // Get user details
-      const userIds = basicMembers.map((member: any) => member.user_id)
-      const { data: usersData, error: usersError } = await supabase
-        .from('users')
-        .select('id, name, email')
-        .in('id', userIds)
-
-      if (usersError) throw usersError
-
-      // Get admin list
-      const { data: adminData } = await supabase
-        .from('group_admins')
-        .select('user_id')
-        .eq('group_id', groupId)
-        .limit(20)
-
-      const adminIds = adminData?.map((admin: any) => admin.user_id) || []
-
-      // Combine data
-      const usersMap = usersData?.reduce((acc: any, user: any) => {
-        acc[user.id] = user
-        return acc
-      }, {}) || {}
-
-      const membersWithDetails = basicMembers?.map((member: any) => {
-        const userDetails = usersMap[member.user_id]
-        if (!userDetails) return null
-        
-        return {
-          ...member,
-          users: {
-            name: userDetails.name || 'Unknown User',
-            email: userDetails.email || 'No email'
-          },
-          isAdmin: adminIds.includes(member.user_id)
-        }
-      }).filter(Boolean) || []
-
-      // Filter for ONLY guest users
-      const guestMembers = membersWithDetails.filter((member: any) => 
-        member.users.email.includes('@temp.local')
-      )
-
-      setGuests(guestMembers)
+      const guestsData = await fetchGuestsAction(groupId)
+      setGuests(guestsData)
     } catch (error) {
       console.error('Error fetching guests:', error)
       setGuests([])
     } finally {
       setGuestsLoading(false)
     }
-  }, [groupId, supabase])
+  }, [groupId])
 
   useEffect(() => {
     fetchGuests()
@@ -115,58 +56,26 @@ export default function GuestManager({ groupId, isAdmin, currentUserId, groupOwn
 
   // Filter guests based on search term
   const filteredGuests = guests.filter(guest => 
-    guest.users.name.toLowerCase().includes(searchTerm.toLowerCase())
+    guest.name.toLowerCase().includes(searchTerm.toLowerCase())
   )
 
   const addGuest = async (e: React.FormEvent) => {
     e.preventDefault()
     
     if (!guestName.trim()) {
-      alert('Please enter a guest name')
+      toast.warning('Please enter a guest name')
       return
     }
 
     setLoading(true)
     try {
-      // Generate email from the name
-      const generatedEmail = `${guestName.trim().toLowerCase().replace(/\s+/g, '.')}.guest-${Date.now()}@temp.local`
-
-      // Create a guest user record
-      const { data: guestUser, error: userError } = await supabase
-        .from('users')
-        .insert({
-          name: guestName.trim(),
-          email: generatedEmail,
-        })
-        .select()
-        .single()
-
-      if (userError) throw userError
-
-      // Add guest to group members
-      const { error: memberError } = await supabase
-        .from('group_members')
-        .insert({
-          group_id: groupId,
-          user_id: guestUser.id,
-        })
-
-      if (memberError) throw memberError
-
-      // Create team player profile
-      const { error: teamPlayerError } = await supabase
-        .from('team_players')
-        .insert({
-          user_id: guestUser.id,
-          group_id: groupId,
-          role: 'player',
-          rating: 5,
-          preferred_position: 'MID',
-        })
-
-      if (teamPlayerError) throw teamPlayerError
-
+      await addGuestAction({
+        groupId,
+        guestName: guestName.trim()
+      })
+      
       // Reset form
+      const addedGuestName = guestName.trim()
       setGuestName('')
       setIsOpen(false)
       
@@ -174,10 +83,10 @@ export default function GuestManager({ groupId, isAdmin, currentUserId, groupOwn
       fetchGuests()
       onGuestAdded?.()
       
-      alert(`Guest "${guestName}" added successfully!`)
+      toast.success(`Guest "${addedGuestName}" added successfully!`)
     } catch (error: any) {
       console.error('Error adding guest:', error)
-      alert('Error adding guest: ' + error.message)
+      toast.error('Error adding guest: ' + error.message)
     } finally {
       setLoading(false)
     }
@@ -185,7 +94,7 @@ export default function GuestManager({ groupId, isAdmin, currentUserId, groupOwn
 
   return (
     <>
-      <div className="bg-white rounded-lg border shadow-sm p-6">
+      <div className="pt-6 border-t border-gray-200">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-semibold">Guest Management</h3>
           <button
@@ -231,19 +140,19 @@ export default function GuestManager({ groupId, isAdmin, currentUserId, groupOwn
               {filteredGuests.length > 0 ? (
                 filteredGuests.map((guest) => (
                   <div 
-                    key={`${guest.group_id}-${guest.user_id}`} 
-                    onClick={() => setSelectedUserId(guest.user_id)}
+                    key={guest.id}
+                    onClick={() => setSelectedUserId(guest.id)}
                     className="flex items-center justify-between p-3 border rounded-md hover:bg-orange-50 cursor-pointer transition-colors border-orange-200"
                   >
                     <div className="flex-1">
                       <div className="flex items-center gap-2">
-                        <h5 className="font-medium text-gray-900">{guest.users.name}</h5>
+                        <h5 className="font-medium text-gray-900">{guest.name}</h5>
                         <span className="px-2 py-0.5 text-xs bg-orange-100 text-orange-800 rounded-full">
                           Guest
                         </span>
                       </div>
                       <p className="text-xs text-gray-500">
-                        Added: {mounted ? new Date(guest.joined_at).toLocaleDateString('en-US', {
+                        Added: {mounted && guest.joinedAt ? new Date(guest.joinedAt).toLocaleDateString('en-US', {
                           month: 'short',
                           day: 'numeric',
                           year: 'numeric'

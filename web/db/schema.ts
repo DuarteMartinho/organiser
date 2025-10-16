@@ -2,9 +2,14 @@ import { pgTable, uuid, text, timestamp, integer, boolean, varchar } from 'drizz
 
 // Users Table
 export const users = pgTable('users', {
-    id: uuid('id').defaultRandom().primaryKey(),
+    id: text('id').primaryKey(),
     name: varchar('name').notNull(),
     email: varchar('email').notNull().unique(),
+    emailVerified: boolean('email_verified').default(false),
+    image: text('image'),
+    createdAt: timestamp('created_at').defaultNow(),
+    updatedAt: timestamp('updated_at').defaultNow(),
+    // Legacy field for backward compatibility
     joinedAt: timestamp('joined_at').defaultNow(),
 });
 
@@ -20,14 +25,14 @@ export const groups = pgTable('groups', {
 // Group Members Table
 export const groupMembers = pgTable('group_members', {
     groupId: uuid('group_id').notNull().references(() => groups.id),
-    userId: uuid('user_id').notNull().references(() => users.id),
+    userId: text('user_id').notNull().references(() => users.id),
     joinedAt: timestamp('joined_at').defaultNow(),
 });
 
 // Group Admins Table
 export const groupAdmins = pgTable('group_admins', {
     groupId: uuid('group_id').notNull().references(() => groups.id),
-    userId: uuid('user_id').notNull().references(() => users.id),
+    userId: text('user_id').notNull().references(() => users.id),
     createdAt: timestamp('created_at').defaultNow(),
 });
 
@@ -35,8 +40,8 @@ export const groupAdmins = pgTable('group_admins', {
 export const groupBans = pgTable('group_bans', {
     id: uuid('id').defaultRandom().primaryKey(),
     groupId: uuid('group_id').references(() => groups.id),
-    userId: uuid('user_id').references(() => users.id),
-    bannedBy: uuid('banned_by').references(() => users.id),
+    userId: text('user_id').references(() => users.id),
+    bannedBy: text('banned_by').references(() => users.id),
     reason: text('reason'),
     createdAt: timestamp('created_at').defaultNow(),
 });
@@ -45,7 +50,7 @@ export const groupBans = pgTable('group_bans', {
 export const groupInvites = pgTable('group_invites', {
     id: uuid('id').defaultRandom().primaryKey(),
     groupId: uuid('group_id').references(() => groups.id),
-    createdBy: uuid('created_by').references(() => users.id),
+    createdBy: text('created_by').references(() => users.id),
     code: varchar('code').notNull().unique(),
     maxUses: integer('max_uses').default(1),
     usedCount: integer('used_count').default(0),
@@ -58,7 +63,7 @@ export const groupInvites = pgTable('group_invites', {
 export const matches = pgTable('matches', {
     id: uuid('id').defaultRandom().primaryKey(),
     groupId: uuid('group_id').references(() => groups.id),
-    createdBy: uuid('created_by').references(() => users.id),
+    createdBy: text('created_by').references(() => users.id),
     dateTime: timestamp('date_time').notNull(),
     location: varchar('location'),
     maxPlayersPerTeam: integer('max_players_per_team').default(11),
@@ -78,7 +83,7 @@ export const teams = pgTable('teams', {
 // Team Players Table
 export const teamPlayers = pgTable('team_players', {
     id: uuid('id').defaultRandom().primaryKey(),
-    userId: uuid('user_id').references(() => users.id),
+    userId: text('user_id').references(() => users.id),
     groupId: uuid('group_id').references(() => groups.id),
     role: varchar('role').default('player').notNull(),
     rating: integer('rating').default(5),
@@ -116,33 +121,42 @@ export const playerMatchStats = pgTable('player_match_stats', {
     createdAt: timestamp('created_at').defaultNow(),
 });
 
-// Accounts Table
+// Accounts Table (Better Auth OAuth)
 export const accounts = pgTable('accounts', {
-    id: uuid('id').defaultRandom().primaryKey(),
-    userId: uuid('user_id').notNull().references(() => users.id),
-    type: text('type').notNull(),
-    provider: text('provider').notNull(),
-    providerAccountId: text('provider_account_id').notNull(),
-    refreshToken: text('refresh_token'),
+    id: text('id').primaryKey(),
+    userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    accountId: text('account_id').notNull(),
+    providerId: text('provider_id').notNull(),
     accessToken: text('access_token'),
-    expiresAt: integer('expires_at'),
-    tokenType: text('token_type'),
-    scope: text('scope'),
+    refreshToken: text('refresh_token'),
     idToken: text('id_token'),
-    sessionState: text('session_state'),
+    expiresAt: timestamp('expires_at'),
+    accessTokenExpiresAt: timestamp('access_token_expires_at'),
+    refreshTokenExpiresAt: timestamp('refresh_token_expires_at'),
+    scope: text('scope'),
+    password: text('password'),
+    createdAt: timestamp('created_at').defaultNow(),
+    updatedAt: timestamp('updated_at').defaultNow(),
 });
 
-// Sessions Table
+// Sessions Table (Better Auth)
 export const sessions = pgTable('sessions', {
-    id: uuid('id').defaultRandom().primaryKey(),
-    sessionToken: text('session_token').notNull().unique(),
-    userId: uuid('user_id').notNull().references(() => users.id),
-    expires: timestamp('expires').notNull(),
+    id: text('id').primaryKey(),
+    userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    token: text('token').notNull().unique(),
+    expiresAt: timestamp('expires_at').notNull(),
+    ipAddress: text('ip_address'),
+    userAgent: text('user_agent'),
+    createdAt: timestamp('created_at').defaultNow(),
+    updatedAt: timestamp('updated_at').defaultNow(),
 });
 
-// Verification Tokens Table
-export const verificationTokens = pgTable('verificationtokens', {
+// Verification Table (Better Auth)
+export const verification = pgTable('verification', {
+    id: text('id').primaryKey(),
     identifier: text('identifier').notNull(),
-    token: text('token').notNull().unique(),
-    expires: timestamp('expires').notNull(),
+    value: text('value').notNull(),
+    expiresAt: timestamp('expires_at').notNull(),
+    createdAt: timestamp('created_at').defaultNow(),
+    updatedAt: timestamp('updated_at').defaultNow(),
 });

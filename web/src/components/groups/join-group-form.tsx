@@ -1,7 +1,10 @@
 'use client'
 
-import { createClient } from '@/lib/supabase/client'
+import { authClient } from '@/lib/auth-client'
 import { useState, useEffect, useCallback } from 'react'
+import { fetchPublicGroupsAction } from '@/actions/groups/fetch-public-groups';
+import { joinGroupAction } from '@/actions/groups/join-group';
+import { joinByInviteCodeAction } from '@/actions/invites/join-by-invite-code';
 
 interface JoinGroupFormProps {
   onSuccess?: () => void
@@ -24,128 +27,46 @@ export default function JoinGroupForm({ onSuccess, onCancel }: JoinGroupFormProp
   const [loadingGroups, setLoadingGroups] = useState(false)
   const [error, setError] = useState('')
 
-  const supabase = createClient()
-
   const fetchPublicGroups = useCallback(async () => {
     setLoadingGroups(true)
     try {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) return
+      const { data: session } = await authClient.getSession()
+      if (!session?.user) return
 
-      // Get public groups that user is not already a member of
-      const { data: userGroups } = await supabase
-        .from('group_members')
-        .select('group_id')
-        .eq('user_id', user.id)
-
-      const userGroupIds = userGroups?.map((g: any) => g.group_id) || []
-
-      let query = supabase
-        .from('groups')
-        .select('*')
-        .eq('privacy', 'public')
-        .order('created_at', { ascending: false })
-
-      // Only add the NOT IN filter if user has groups
-      if (userGroupIds.length > 0) {
-        query = query.not('id', 'in', `(${userGroupIds.join(',')})`)
-      }
-
-      const { data: groups, error } = await query
-
-      if (error) throw error
-      setPublicGroups(groups || [])
+      // Fetch public groups using server action
+      const groups = await fetchPublicGroupsAction(session.user.id);
+      
+      // Map to match the Group interface
+      const mappedGroups = groups.map(group => ({
+        ...group,
+        created_at: group.createdAt?.toISOString() || new Date().toISOString(),
+      }));
+      
+      setPublicGroups(mappedGroups || [])
     } catch (error: any) {
       setError(error.message)
     } finally {
       setLoadingGroups(false)
     }
-  }, [supabase])
+  }, [])
 
   const joinGroup = async (groupId: string) => {
     setLoading(true)
     setError('')
 
     try {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) throw new Error('Not authenticated')
+      const { data: session } = await authClient.getSession()
+      if (!session?.user) throw new Error('Not authenticated')
 
-      // Ensure user exists in our users table
-      const { error: userError } = await supabase
-        .from('users')
-        .upsert({
-          id: user.id,
-          name: user.user_metadata?.full_name || user.email?.split('@')[0] || 'Unknown',
-          email: user.email!,
-        })
+      const user = session.user
 
-      if (userError) throw userError
-
-      // Check if user is already a member
-      const { data: existingMember } = await supabase
-        .from('group_members')
-        .select('id')
-        .eq('group_id', groupId)
-        .eq('user_id', user.id)
-        .single()
-
-      if (existingMember) {
-        throw new Error('You are already a member of this group')
-      }
-
-      // Check if user has leftover team_player data (from previous membership)
-      const { data: existingTeamPlayer } = await supabase
-        .from('team_players')
-        .select('id')
-        .eq('group_id', groupId)
-        .eq('user_id', user.id)
-        .single()
-
-      // Clean up any leftover data before rejoining
-      if (existingTeamPlayer) {
-        // Remove old team_player record
-        await supabase
-          .from('team_players')
-          .delete()
-          .eq('group_id', groupId)
-          .eq('user_id', user.id)
-
-        // Remove any leftover admin privileges
-        await supabase
-          .from('group_admins')
-          .delete()
-          .eq('group_id', groupId)
-          .eq('user_id', user.id)
-      }
-
-      // Add user as member
-      const { error: memberError } = await supabase
-        .from('group_members')
-        .insert({
-          group_id: groupId,
-          user_id: user.id,
-        })
-
-      if (memberError) {
-        if (memberError.code === '23505') {
-          throw new Error('You are already a member of this group')
-        }
-        throw memberError
-      }
-
-      // Create new team_player profile (always as regular player when rejoining)
-      const { error: teamPlayerError } = await supabase
-        .from('team_players')
-        .insert({
-          user_id: user.id,
-          group_id: groupId,
-          role: 'player', // Always start as player, admin can promote later
-          rating: 5, // Reset to default rating
-          is_key_player: false, // Reset key player status
-          preferred_position: 'MID', // Reset to default position
-        })
-
-      if (teamPlayerError) throw teamPlayerError
+      // Join group using server action
+      await joinGroupAction({
+        groupId,
+        userId: user.id,
+        userName: user.name || user.email?.split('@')[0] || 'Unknown',
+        userEmail: user.email!,
+      });
 
       onSuccess?.()
     } catch (error: any) {
@@ -162,129 +83,18 @@ export default function JoinGroupForm({ onSuccess, onCancel }: JoinGroupFormProp
     setError('')
 
     try {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) throw new Error('Not authenticated')
+      const { data: session } = await authClient.getSession()
+      if (!session?.user) throw new Error('Not authenticated')
 
-      // Check if user exists and ensure they're in our users table
-      const { error: userError } = await supabase
-        .from('users')
-        .upsert({
-          id: user.id,
-          name: user.user_metadata?.full_name || user.email?.split('@')[0] || 'Unknown',
-          email: user.email!,
-        })
+      const user = session.user
 
-      if (userError) throw userError
-
-      // Find the invite code
-      const { data: invite, error: inviteError } = await supabase
-        .from('group_invites')
-        .select(`
-          *,
-          groups (
-            id,
-            name,
-            privacy
-          )
-        `)
-        .eq('code', inviteCode.trim().toUpperCase())
-        .eq('is_active', true)
-        .single()
-
-      if (inviteError || !invite) {
-        throw new Error('Invalid or expired invite code')
-      }
-
-      // Check if invite is expired
-      if (invite.expires_at && new Date(invite.expires_at) < new Date()) {
-        throw new Error('This invite code has expired')
-      }
-
-      // Check if invite has reached max uses
-      if (invite.max_uses !== -1 && invite.used_count >= invite.max_uses) {
-        throw new Error('This invite code has reached its maximum uses')
-      }
-
-      // Check if user is banned from this group
-      const { data: ban } = await supabase
-        .from('group_bans')
-        .select('id')
-        .eq('group_id', invite.group_id)
-        .eq('user_id', user.id)
-        .single()
-
-      if (ban) {
-        throw new Error('You are banned from this group')
-      }
-
-      // Check if user is already a member
-      const { data: existingMember } = await supabase
-        .from('group_members')
-        .select('id')
-        .eq('group_id', invite.group_id)
-        .eq('user_id', user.id)
-        .single()
-
-      if (existingMember) {
-        throw new Error('You are already a member of this group')
-      }
-
-      // Check for leftover team_player data and clean it up
-      const { data: existingTeamPlayer } = await supabase
-        .from('team_players')
-        .select('id')
-        .eq('group_id', invite.group_id)
-        .eq('user_id', user.id)
-        .single()
-
-      if (existingTeamPlayer) {
-        // Clean up leftover data
-        await supabase
-          .from('team_players')
-          .delete()
-          .eq('group_id', invite.group_id)
-          .eq('user_id', user.id)
-
-        await supabase
-          .from('group_admins')
-          .delete()
-          .eq('group_id', invite.group_id)
-          .eq('user_id', user.id)
-      }
-
-      // Join the group
-      const { error: memberError } = await supabase
-        .from('group_members')
-        .insert({
-          group_id: invite.group_id,
-          user_id: user.id,
-        })
-
-      if (memberError) throw memberError
-
-      // Create team_player profile (reset to defaults)
-      const { error: teamPlayerError } = await supabase
-        .from('team_players')
-        .insert({
-          user_id: user.id,
-          group_id: invite.group_id,
-          role: 'player',
-          rating: 5,
-          is_key_player: false,
-          preferred_position: 'MID',
-        })
-
-      if (teamPlayerError) throw teamPlayerError
-
-      // Update invite usage count
-      const { error: updateError } = await supabase
-        .from('group_invites')
-        .update({ 
-          used_count: invite.used_count + 1 
-        })
-        .eq('id', invite.id)
-
-      if (updateError) console.warn('Failed to update invite usage:', updateError)
+      // Join using server action
+      await joinByInviteCodeAction({
+        inviteCode: inviteCode.trim().toUpperCase(),
+        userId: user.id,
+        userName: user.name || user.email?.split('@')[0] || 'Unknown',
+        userEmail: user.email!,
+      });
 
       // Clear form and close
       setInviteCode('')

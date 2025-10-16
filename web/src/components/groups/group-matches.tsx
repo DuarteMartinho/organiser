@@ -1,32 +1,32 @@
 'use client'
 
-import { createClient } from '@/lib/supabase/client'
 import { useState, useEffect, useCallback } from 'react'
 import MatchDetails from './match-details'
+import { fetchMatchesByGroupAction } from '@/actions/matches/fetch-matches-by-group'
+import { createMatchAction } from '@/actions/matches/create-match'
+import { checkUserInMatchAction } from '@/actions/match-players/check-user-in-match'
+import { addMatchPlayerAction } from '@/actions/match-players/add-match-player'
+import { deleteMatchPlayerAction } from '@/actions/match-players/delete-match-player'
+import { getTeamPlayerAction } from '@/actions/team-players/get-team-player'
+import { addToWaitingListAction } from '@/actions/match-waiting-list/add-to-waiting-list'
+import { deleteFromWaitingListAction } from '@/actions/match-waiting-list/delete-waiting-list'
+import { useToast } from '@/hooks/useToast'
 
 interface Match {
   id: string
-  date_time: string
+  dateTime: Date | string
   location: string | null
-  max_players_per_team: number
-  planned_teams: number
-  teams_created: boolean
-  teams_finalized: boolean
-  created_at: string
-  created_by: string
-  teams?: Array<{ 
-    id: string; 
-    name: string;
-    match_players: Array<{
-      id: string;
-      team_player_id: string | null;
-      guest_name: string | null;
-    }>;
-  }>
-  match_players?: Array<{
-    id: string;
-    team_player_id: string | null;
-    guest_name: string | null;
+  maxPlayersPerTeam: number | null
+  plannedTeams: number | null
+  teamsCreated: boolean | null
+  teamsFinalized: boolean | null
+  createdAt: Date | null
+  createdBy: string | null
+  groupId: string | null
+  matchPlayers?: Array<{
+    id: string
+    teamPlayerId: string | null
+    guestName: string | null
   }>
 }
 
@@ -41,46 +41,23 @@ export default function GroupMatches({
   isAdmin, 
   currentUserId
 }: GroupMatchesProps) {
+  const toast = useToast()
   const [matches, setMatches] = useState<Match[]>([])
   const [loading, setLoading] = useState(true)
   const [showCreateForm, setShowCreateForm] = useState(false)
   const [selectedMatchId, setSelectedMatchId] = useState<string | null>(null)
-  const supabase = createClient()
 
   const fetchMatches = useCallback(async () => {
     try {
-      const { data, error } = await supabase
-        .from('matches')
-        .select(`
-          *,
-          teams (
-            id,
-            name,
-            match_players (
-              id,
-              team_player_id,
-              guest_name
-            )
-          ),
-          match_players!match_id (
-            id,
-            team_player_id,
-            guest_name
-          )
-        `)
-        .eq('group_id', groupId)
-        .order('date_time', { ascending: false }) // Most recent first
-        .limit(50) // Increased limit but still reasonable
-
-      if (error) throw error
-      setMatches(data || [])
+      const data = await fetchMatchesByGroupAction(groupId)
+      setMatches(data)
     } catch (error) {
       console.error('Error fetching matches:', error)
-      setMatches([]) // Set empty array on error
+      setMatches([])
     } finally {
       setLoading(false)
     }
-  }, [groupId, supabase])
+  }, [groupId])
 
   useEffect(() => {
     let isMounted = true
@@ -96,15 +73,21 @@ export default function GroupMatches({
     return () => {
       isMounted = false
     }
-  }, [groupId]) // Only depend on groupId, not fetchMatches
+  }, [groupId])
 
   const now = new Date()
-  const upcomingMatches = matches.filter(match => new Date(match.date_time) > now).slice(0, 5)
-  const pastMatches = matches.filter(match => new Date(match.date_time) <= now).slice(0, 5)
+  const upcomingMatches = matches.filter(match => {
+    const matchDate = match.dateTime instanceof Date ? match.dateTime : new Date(match.dateTime)
+    return matchDate > now
+  }).slice(0, 5)
+  const pastMatches = matches.filter(match => {
+    const matchDate = match.dateTime instanceof Date ? match.dateTime : new Date(match.dateTime)
+    return matchDate <= now
+  }).slice(0, 5)
 
   if (loading) {
     return (
-      <div className="bg-white rounded-lg border shadow-sm p-6">
+      <div>
         <h3 className="text-lg font-semibold mb-4">Matches</h3>
         <p className="text-gray-500">Loading...</p>
       </div>
@@ -126,7 +109,7 @@ export default function GroupMatches({
       )}
 
       {/* Upcoming Matches */}
-      <div className="bg-white rounded-lg border shadow-sm p-6">
+      <div>
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-semibold">Upcoming Matches</h3>
           {isAdmin && (
@@ -159,7 +142,7 @@ export default function GroupMatches({
 
       {/* Past Matches */}
       {pastMatches.length > 0 && (
-        <div className="bg-white rounded-lg border shadow-sm p-6">
+        <div className="pt-6 border-t border-gray-200 mt-6">
           <h3 className="text-lg font-semibold mb-4">Previous Matches</h3>
           <div className="space-y-3">
             {pastMatches.map((match) => (
@@ -174,10 +157,16 @@ export default function GroupMatches({
               />
             ))}
           </div>
-          {matches.filter(match => new Date(match.date_time) <= now).length > 5 && (
+          {matches.filter(match => {
+            const matchDate = match.dateTime instanceof Date ? match.dateTime : new Date(match.dateTime)
+            return matchDate <= now
+          }).length > 5 && (
             <div className="mt-4 text-center">
               <p className="text-sm text-gray-500">
-                Showing recent 5 matches of {matches.filter(match => new Date(match.date_time) <= now).length} total
+                Showing recent 5 matches of {matches.filter(match => {
+                  const matchDate = match.dateTime instanceof Date ? match.dateTime : new Date(match.dateTime)
+                  return matchDate <= now
+                }).length} total
               </p>
             </div>
           )}
@@ -206,43 +195,31 @@ function MatchCard({ match, isUpcoming, onViewDetails, currentUserId, groupId, o
   groupId: string;
   onMatchUpdate: () => void;
 }) {
+  const toast = useToast()
   const [loading, setLoading] = useState(false)
   const [userInMatch, setUserInMatch] = useState(false)
-  const supabase = createClient()
-  const matchDate = new Date(match.date_time)
+  const matchDate = match.dateTime instanceof Date ? match.dateTime : new Date(match.dateTime)
   const isToday = matchDate.toDateString() === new Date().toDateString()
-  const numberOfTeams = match.teams?.length || match.planned_teams
-  const maxTotalPlayers = numberOfTeams * match.max_players_per_team
-  const currentPlayers = match.match_players?.length || 0
+  const numberOfTeams = match.plannedTeams || 2
+  const maxTotalPlayers = numberOfTeams * (match.maxPlayersPerTeam || 11)
+  const currentPlayers = match.matchPlayers?.length || 0
 
   const checkUserInMatch = useCallback(async () => {
     if (!currentUserId || !groupId) return
 
     try {
-      // Get current user's team_player record
-      const { data: teamPlayerData } = await supabase
-        .from('team_players')
-        .select('id')
-        .eq('user_id', currentUserId)
-        .eq('group_id', groupId)
-        .single()
-
-      if (!teamPlayerData) return
-
-      // Check if user is in this match (either assigned to team or registered directly)
-      const { data: matchPlayerData } = await supabase
-        .from('match_players')
-        .select('id')
-        .eq('team_player_id', teamPlayerData.id)
-        .eq('match_id', match.id)
-        .single()
-
-      setUserInMatch(!!matchPlayerData)
+      const teamPlayer = await getTeamPlayerAction(currentUserId, groupId)
+      if (!teamPlayer) {
+        setUserInMatch(false)
+        return
+      }
+      
+      const isInMatch = await checkUserInMatchAction(teamPlayer.id, match.id)
+      setUserInMatch(isInMatch)
     } catch (error) {
-      // User not in match
       setUserInMatch(false)
     }
-  }, [currentUserId, groupId, match.id, supabase])
+  }, [currentUserId, groupId, match.id])
 
   useEffect(() => {
     checkUserInMatch()
@@ -250,78 +227,56 @@ function MatchCard({ match, isUpcoming, onViewDetails, currentUserId, groupId, o
 
   const handleJoinLeave = async () => {
     if (!currentUserId || !groupId) {
-      alert('Please log in to join matches')
+      toast.warning('Please log in to join matches')
       return
     }
 
     setLoading(true)
     try {
-      // Get current user's team_player record
-      const { data: teamPlayerData, error: teamPlayerError } = await supabase
-        .from('team_players')
-        .select('id')
-        .eq('user_id', currentUserId)
-        .eq('group_id', groupId)
-        .single()
-
-      if (teamPlayerError) throw teamPlayerError
+      const teamPlayer = await getTeamPlayerAction(currentUserId, groupId)
+      if (!teamPlayer) {
+        throw new Error('You must be a member of this group to join matches')
+      }
 
       if (userInMatch) {
         // Leave match - remove from match_players
-        const { error: leaveError } = await supabase
-          .from('match_players')
-          .delete()
-          .eq('team_player_id', teamPlayerData.id)
-          .eq('match_id', match.id)
-
-        if (leaveError) throw leaveError
+        await deleteMatchPlayerAction(teamPlayer.id, match.id)
 
         // Also remove from waiting list if they're on it
-        await supabase
-          .from('match_waiting_list')
-          .delete()
-          .eq('match_id', match.id)
-          .eq('team_player_id', teamPlayerData.id)
+        await deleteFromWaitingListAction(match.id, teamPlayer.id)
 
         setUserInMatch(false)
-        onMatchUpdate() // Refresh match data
-        alert('Successfully left the match!')
+        onMatchUpdate()
+        toast.success('Successfully left the match!')
       } else {
         // Join match - check if there's space
-        const totalSpots = match.planned_teams * match.max_players_per_team
-        const currentPlayers = match.match_players?.length || 0
+        const totalSpots = (match.plannedTeams || 2) * (match.maxPlayersPerTeam || 11)
+        const currentPlayers = match.matchPlayers?.length || 0
         
         if (currentPlayers < totalSpots) {
           // Space available - register directly to match
-          const { error: joinError } = await supabase
-            .from('match_players')
-            .insert({
-              match_id: match.id,
-              team_player_id: teamPlayerData.id,
-              team_id: null // Will be assigned when teams are created
-            })
-
-          if (joinError) throw joinError
+          await addMatchPlayerAction({
+            matchId: match.id,
+            teamPlayerId: teamPlayer.id,
+            teamId: null,
+            guestName: null
+          })
           
           setUserInMatch(true)
-          onMatchUpdate() // Refresh match data
-          alert('Successfully joined the match! You\'ll be assigned to a team when teams are created.')
+          onMatchUpdate()
+          toast.success('Successfully joined the match! You\'ll be assigned to a team when teams are created.')
         } else {
           // Match is full, join waiting list
-          const { error: waitingError } = await supabase
-            .from('match_waiting_list')
-            .insert({
-              match_id: match.id,
-              team_player_id: teamPlayerData.id
-            })
-
-          if (waitingError) throw waitingError
-          alert('Match is full! You have been added to the waiting list.')
+          await addToWaitingListAction({
+            matchId: match.id,
+            teamPlayerId: teamPlayer.id
+          })
+          toast.info('Match is full! You have been added to the waiting list.')
         }
       }
     } catch (error: any) {
       console.error('Error joining/leaving match:', error)
-      alert('Error: ' + error.message)
+      toast.error('Error: ' + error.message)
     } finally {
       setLoading(false)
     }
@@ -351,20 +306,15 @@ function MatchCard({ match, isUpcoming, onViewDetails, currentUserId, groupId, o
           <div className="mt-1 space-y-1 text-sm text-gray-600">
             <p>📅 {matchDate.toLocaleDateString()} at {matchDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
             {match.location && <p>📍 {match.location}</p>}
-            <p>⚽ {numberOfTeams} teams planned, {match.max_players_per_team} players each</p>
+            <p>⚽ {numberOfTeams} teams planned, {match.maxPlayersPerTeam || 11} players each</p>
             <p>👥 {currentPlayers}/{maxTotalPlayers} players registered</p>
-            {match.teams_created ? (
+            {match.teamsCreated ? (
               <p className="text-xs text-green-600">✓ Teams created</p>
             ) : (
               <p className="text-xs text-blue-600">Registration open</p>
             )}
-            {match.teams_finalized && (
+            {match.teamsFinalized && (
               <p className="text-xs text-purple-600">✓ Teams finalized</p>
-            )}
-            {numberOfTeams > 0 && (
-              <p className="text-xs">
-                Teams: {match.teams?.map(team => team.name).join(', ')}
-              </p>
             )}
           </div>
         </div>
@@ -376,7 +326,7 @@ function MatchCard({ match, isUpcoming, onViewDetails, currentUserId, groupId, o
           >
             View Details
           </button>
-          {isUpcoming && !match.teams_finalized && (
+          {isUpcoming && !match.teamsFinalized && (
             <button 
               onClick={handleJoinLeave}
               disabled={loading}
@@ -411,8 +361,6 @@ function CreateMatchForm({
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
-  const supabase = createClient()
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!dateTime) return
@@ -421,29 +369,18 @@ function CreateMatchForm({
     setError('')
 
     try {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) throw new Error('Not authenticated')
+      const { authClient } = await import('@/lib/auth-client')
+      const { data: session } = await authClient.getSession()
+      if (!session?.user) throw new Error('Not authenticated')
 
-      // Create the match (teams will be created later by admins)
-      const { data: matchData, error: matchError } = await supabase
-        .from('matches')
-        .insert({
-          group_id: groupId,
-          created_by: user.id,
-          date_time: dateTime,
-          location: location || null,
-          max_players_per_team: maxPlayers,
-          planned_teams: numberOfTeams,
-          teams_created: false,
-          teams_finalized: false
-        })
-        .select()
-        .single()
-
-      if (matchError) throw matchError
-
-      // Note: Teams are no longer created automatically
-      // They will be created by admins when there are enough players
+      await createMatchAction({
+        groupId,
+        createdBy: session.user.id,
+        dateTime: new Date(dateTime),
+        location: location || null,
+        maxPlayersPerTeam: maxPlayers,
+        plannedTeams: numberOfTeams
+      })
 
       onSuccess()
     } catch (error: any) {

@@ -1,7 +1,8 @@
 'use client'
 
-import { createClient } from '@/lib/supabase/client'
 import { useState } from 'react'
+import { updateUserProfileAction } from '@/actions/user-details/update-user-profile'
+import { useToast } from '@/hooks/useToast'
 
 interface UserEditModalProps {
   isOpen: boolean
@@ -10,13 +11,13 @@ interface UserEditModalProps {
   groupId: string
   userDetails: {
     id: string
-    name: string
-    email: string
+    name: string | null
+    email: string | null
     teamPlayer: {
-      rating: number
-      is_key_player: boolean
-      preferred_position: string
-      role: string
+      rating: number | null
+      isKeyPlayer: boolean | null
+      preferredPosition: string | null
+      role: string | null
     } | null
   }
   canEditAdvanced: boolean // true for admins/owners
@@ -39,59 +40,43 @@ export default function UserEditModal({
   canEditAdvanced,
   onUserUpdated
 }: UserEditModalProps) {
-  const [name, setName] = useState(userDetails.name)
+  const toast = useToast()
+  const [name, setName] = useState(userDetails.name || '')
   const [rating, setRating] = useState(userDetails.teamPlayer?.rating || 5)
-  const [position, setPosition] = useState(userDetails.teamPlayer?.preferred_position || 'MID')
-  const [isKeyPlayer, setIsKeyPlayer] = useState(userDetails.teamPlayer?.is_key_player || false)
+  const [position, setPosition] = useState(userDetails.teamPlayer?.preferredPosition || 'MID')
+  const [isKeyPlayer, setIsKeyPlayer] = useState(userDetails.teamPlayer?.isKeyPlayer || false)
   const [loading, setLoading] = useState(false)
-  const supabase = createClient()
 
   if (!isOpen) return null
 
   // Check if this is a guest user
-  const isGuest = userDetails.email.includes('@temp.local')
+  const isGuest = userDetails.email?.includes('@temp.local') || false
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     
     if (!name.trim()) {
-      alert('Name is required')
+      toast.warning('Name is required')
       return
     }
 
     setLoading(true)
     try {
-      // Update user name only (email never changes)
-      const { error: userError } = await supabase
-        .from('users')
-        .update({
-          name: name.trim()
-        })
-        .eq('id', userId)
-
-      if (userError) throw userError
-
-      // Update team player info (if user has a team player profile and permission)
-      if (userDetails.teamPlayer && canEditAdvanced) {
-        const { error: teamPlayerError } = await supabase
-          .from('team_players')
-          .update({
-            rating: rating,
-            preferred_position: position,
-            is_key_player: isKeyPlayer
-          })
-          .eq('user_id', userId)
-          .eq('group_id', groupId)
-
-        if (teamPlayerError) throw teamPlayerError
-      }
+      await updateUserProfileAction({
+        userId,
+        name: name.trim(),
+        groupId: userDetails.teamPlayer && canEditAdvanced ? groupId : undefined,
+        rating: userDetails.teamPlayer && canEditAdvanced ? rating : undefined,
+        preferredPosition: userDetails.teamPlayer && canEditAdvanced ? position : undefined,
+        isKeyPlayer: userDetails.teamPlayer && canEditAdvanced ? isKeyPlayer : undefined,
+      })
 
       onUserUpdated()
       onClose()
-      alert('Profile updated successfully!')
+      toast.success('Profile updated successfully!')
     } catch (error: any) {
       console.error('Error updating profile:', error)
-      alert('Error updating profile: ' + error.message)
+      toast.error('Error updating profile: ' + error.message)
     } finally {
       setLoading(false)
     }
@@ -99,10 +84,10 @@ export default function UserEditModal({
 
   const handleCancel = () => {
     // Reset form to original values
-    setName(userDetails.name)
+    setName(userDetails.name || '')
     setRating(userDetails.teamPlayer?.rating || 5)
-    setPosition(userDetails.teamPlayer?.preferred_position || 'MID')
-    setIsKeyPlayer(userDetails.teamPlayer?.is_key_player || false)
+    setPosition(userDetails.teamPlayer?.preferredPosition || 'MID')
+    setIsKeyPlayer(userDetails.teamPlayer?.isKeyPlayer || false)
     onClose()
   }
 

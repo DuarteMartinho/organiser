@@ -1,48 +1,38 @@
 'use client'
 
-import { createClient } from '@/lib/supabase/client'
+import { authClient } from '@/lib/auth-client'
 import { useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
-import type { User } from '@supabase/supabase-js'
+
+interface User {
+  id: string
+  name: string
+  email: string
+}
 
 export default function AuthButton() {
-  const supabase = createClient()
   const router = useRouter()
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
-  const [origin, setOrigin] = useState('')
 
   useEffect(() => {
-    setOrigin(window.location.origin)
-    
-    // Get initial user
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      setUser(user)
+    // Get initial session
+    authClient.getSession().then(({ data }) => {
+      setUser(data?.user ?? null)
       setLoading(false)
     })
-
-    // Listen for auth changes
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((event, session) => {
-      setUser(session?.user ?? null)
-      setLoading(false)
-    })
-
-    return () => subscription.unsubscribe()
-  }, [supabase])
+  }, [])
 
   const handleSignIn = async () => {
-    await supabase.auth.signInWithOAuth({
+    await authClient.signIn.social({
       provider: 'google',
-      options: {
-        redirectTo: `${origin}/auth/callback`,
-      },
+      callbackURL: '/dashboard',
     })
   }
 
   const handleSignOut = async () => {
-    await supabase.auth.signOut()
+    await authClient.signOut()
+    router.push('/')
     router.refresh()
   }
 
@@ -63,7 +53,7 @@ export default function AuthButton() {
     return (
       <div className="flex items-center space-x-4">
         <span className="text-sm text-gray-700">
-          Welcome, {user.user_metadata?.full_name || user.email}!
+          Welcome, {user.name || user.email}!
         </span>
         <button
           onClick={handleSignOut}

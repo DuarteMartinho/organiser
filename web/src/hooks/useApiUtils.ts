@@ -2,7 +2,7 @@ import { useRef, useCallback } from 'react'
 
 // Custom hook to debounce function calls and prevent excessive API requests
 export const useDebounce = (func: Function, delay: number) => {
-    const timeoutRef = useRef<NodeJS.Timeout>()
+    const timeoutRef = useRef<NodeJS.Timeout | undefined>(undefined)
 
     return useCallback((...args: any[]) => {
         if (timeoutRef.current) {

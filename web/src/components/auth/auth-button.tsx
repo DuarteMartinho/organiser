@@ -1,39 +1,22 @@
 'use client'
 
-import { createClient } from '@/lib/supabase/client'
+import { authClient } from '@/lib/auth-client'
 import { useRouter } from 'next/navigation'
-import { useEffect, useState } from 'react'
 
 export default function AuthButton() {
-  const supabase = createClient()
   const router = useRouter()
-  const [origin, setOrigin] = useState('')
-
-  useEffect(() => {
-    setOrigin(window.location.origin)
-  }, [])
 
   const handleSignIn = async () => {
-    await supabase.auth.signInWithOAuth({
+    await authClient.signIn.social({
       provider: 'google',
-      options: {
-        redirectTo: `${origin}/auth/callback`,
-      },
+      callbackURL: '/dashboard',
     })
   }
 
   const handleSignOut = async () => {
-    await supabase.auth.signOut()
+    await authClient.signOut()
+    router.push('/')
     router.refresh()
-  }
-
-  const handleGitHubSignIn = async () => {
-    await supabase.auth.signInWithOAuth({
-      provider: 'github',
-      options: {
-        redirectTo: `${origin}/auth/callback`,
-      },
-    })
   }
 
   return (

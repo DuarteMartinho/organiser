@@ -1,1 +1,0 @@
-export { fetchUserGroups } from './fetchUserGroups';

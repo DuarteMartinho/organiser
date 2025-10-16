@@ -30,11 +30,11 @@
             "@/types/*": [
                 "./types/*"
             ],
+            "@/actions/*": [
+                "./actions/*"
+            ],
             "@/*": [
                 "./src/*"
-            ],
-            "@actions/*": [
-                "./actions/*"
             ],
             "@/db/*": [
                 "./db/*"

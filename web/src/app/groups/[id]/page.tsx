@@ -1,6 +1,8 @@
-import { createClient } from '@/lib/supabase/server'
-import { notFound } from 'next/navigation'
+import { getCurrentUser } from '@/lib/auth/server'
+import { notFound, redirect } from 'next/navigation'
+import Link from 'next/link'
 import GroupPageClient from '@/components/groups/group-page-client'
+import { fetchGroupPageDataAction } from '@/actions/groups/fetch-group-page-data'
 
 interface GroupPageProps {
   params: Promise<{
@@ -8,89 +10,54 @@ interface GroupPageProps {
   }>
 }
 
-interface GroupData {
-  id: string
-  name: string
-  description: string | null
-  privacy: string
-  created_at: string
-}
-
 export default async function GroupPage({ params }: GroupPageProps) {
   const { id } = await params
-  const supabase = await createClient()
-  
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const user = await getCurrentUser()
 
   if (!user) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <h1 className="text-2xl font-bold text-gray-900 mb-2">Access Denied</h1>
-          <p className="text-gray-600">Please sign in to view this group.</p>
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-green-50 flex items-center justify-center p-4">
+        <div className="bg-white/80 backdrop-blur-sm rounded-2xl shadow-xl p-12 text-center max-w-md border border-gray-200">
+          <div className="text-6xl mb-4">🔒</div>
+          <h1 className="text-3xl font-bold text-gray-900 mb-3">Access Denied</h1>
+          <p className="text-gray-600 mb-6">Please sign in to view this group.</p>
+          <Link 
+            href="/auth"
+            className="inline-block px-6 py-3 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-lg hover:from-blue-700 hover:to-blue-800 transition-all font-medium shadow-md hover:shadow-lg"
+          >
+            Sign In
+          </Link>
         </div>
       </div>
     )
   }
 
-  // Get group data
-  const { data: group, error: groupError } = await supabase
-    .from('groups')
-    .select('*')
-    .eq('id', id)
-    .single()
+  // Fetch group data using Drizzle
+  const groupData = await fetchGroupPageDataAction(id, user.id)
 
-  if (groupError || !group) {
+  if (!groupData) {
     notFound()
   }
 
-  // Check if user is a member
-  const { data: membership } = await supabase
-    .from('group_members')
-    .select('*')
-    .eq('group_id', id)
-    .eq('user_id', user.id)
-    .single()
+  const { group, isMember, isAdmin, groupOwnerId } = groupData
 
-  if (!membership) {
+  if (!isMember) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <h1 className="text-2xl font-bold text-gray-900 mb-2">Access Denied</h1>
-          <p className="text-gray-600 mb-4">You are not a member of this group.</p>
-          <a 
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-green-50 flex items-center justify-center p-4">
+        <div className="bg-white/80 backdrop-blur-sm rounded-2xl shadow-xl p-12 text-center max-w-md border border-gray-200">
+          <div className="text-6xl mb-4">⚠️</div>
+          <h1 className="text-3xl font-bold text-gray-900 mb-3">Access Denied</h1>
+          <p className="text-gray-600 mb-6">You are not a member of this group.</p>
+          <Link 
             href="/dashboard"
-            className="text-blue-600 hover:text-blue-800 underline"
+            className="inline-block px-6 py-3 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-lg hover:from-blue-700 hover:to-blue-800 transition-all font-medium shadow-md hover:shadow-lg"
           >
             Return to Dashboard
-          </a>
+          </Link>
         </div>
       </div>
     )
   }
-
-  // Check if user is admin
-  const { data: adminData } = await supabase
-    .from('group_admins')
-    .select('*')
-    .eq('group_id', id)
-    .eq('user_id', user.id)
-    .single()
-
-  const isAdmin = !!adminData
-
-  // Get the group owner (first admin chronologically)
-  const { data: ownerData } = await supabase
-    .from('group_admins')
-    .select('user_id, created_at')
-    .eq('group_id', id)
-    .order('created_at', { ascending: true })
-    .limit(1)
-    .single()
-  
-  const groupOwnerId = ownerData?.user_id
 
   return (
     <GroupPageClient

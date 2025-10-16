@@ -1,7 +1,8 @@
 'use client'
 
-import { createClient } from '@/lib/supabase/client'
+import { authClient } from '@/lib/auth-client'
 import { useState } from 'react'
+import { createGroupAction } from '@/actions/groups/create-group';
 
 interface CreateGroupFormProps {
   onSuccess?: () => void
@@ -15,8 +16,6 @@ export default function CreateGroupForm({ onSuccess, onCancel }: CreateGroupForm
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
-  const supabase = createClient()
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
@@ -24,63 +23,20 @@ export default function CreateGroupForm({ onSuccess, onCancel }: CreateGroupForm
 
     try {
       // Get current user
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) throw new Error('Not authenticated')
+      const { data: session } = await authClient.getSession()
+      if (!session?.user) throw new Error('Not authenticated')
 
-      // First, ensure user exists in our users table
-      const { error: userError } = await supabase
-        .from('users')
-        .upsert({
-          id: user.id,
-          name: user.user_metadata?.full_name || user.email?.split('@')[0] || 'Unknown',
-          email: user.email!,
-        })
+      const user = session.user
 
-      if (userError) throw userError
-
-      // Create the group
-      const { data: group, error: groupError } = await supabase
-        .from('groups')
-        .insert({
-          name,
-          description,
-          privacy,
-        })
-        .select()
-        .single()
-
-      if (groupError) throw groupError
-
-      // Add creator as admin
-      const { error: adminError } = await supabase
-        .from('group_admins')
-        .insert({
-          group_id: group.id,
-          user_id: user.id,
-        })
-
-      if (adminError) throw adminError
-
-      // Add creator as member
-      const { error: memberError } = await supabase
-        .from('group_members')
-        .insert({
-          group_id: group.id,
-          user_id: user.id,
-        })
-
-      if (memberError) throw memberError
-
-      // Create team_player profile for the creator
-      const { error: teamPlayerError } = await supabase
-        .from('team_players')
-        .insert({
-          user_id: user.id,
-          group_id: group.id,
-          role: 'admin',
-        })
-
-      if (teamPlayerError) throw teamPlayerError
+      // Create the group using server action
+      await createGroupAction({
+        name,
+        description,
+        privacy,
+        userId: user.id,
+        userName: user.name || user.email?.split('@')[0] || 'Unknown',
+        userEmail: user.email!,
+      });
 
       // Reset form
       setName('')

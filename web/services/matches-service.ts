@@ -1,116 +1,119 @@
-import { db } from "../db/connection";
-import { matches } from "../db/schema";
-import { eq, inArray } from "drizzle-orm";
-import type { Match } from "../types/entities";
+import { db } from '@/db/connection';
+import { matches, matchPlayers } from '@/db/schema';
+import { inArray, eq } from 'drizzle-orm';
 
 export const matchesService = {
-    async getAll(): Promise<Match[]> {
-        const result = await db.select().from(matches);
-        return result.map(match => ({
-            ...match,
-            groupId: match.groupId ?? undefined,
-            createdBy: match.createdBy ?? undefined,
-            location: match.location ?? undefined,
-            maxPlayersPerTeam: match.maxPlayersPerTeam ?? undefined,
-            teamsCreated: match.teamsCreated ?? undefined,
-            teamsFinalized: match.teamsFinalized ?? undefined,
-            plannedTeams: match.plannedTeams ?? undefined,
-            createdAt: match.createdAt ?? new Date(),
-            dateTime: match.dateTime ?? new Date(),
-        }));
-    },
+    async fetchMatches(groupIds: string[]) {
+        if (groupIds.length === 0) return { upcoming: [], past: [] };
 
-    async getById(id: string): Promise<Match | undefined> {
-        const result = await db.select().from(matches).where(eq(matches.id, id));
-        if (result[0]) {
-            return {
-                ...result[0],
-                groupId: result[0].groupId ?? undefined,
-                createdBy: result[0].createdBy ?? undefined,
-                location: result[0].location ?? undefined,
-                maxPlayersPerTeam: result[0].maxPlayersPerTeam ?? undefined,
-                teamsCreated: result[0].teamsCreated ?? undefined,
-                teamsFinalized: result[0].teamsFinalized ?? undefined,
-                plannedTeams: result[0].plannedTeams ?? undefined,
-                createdAt: result[0].createdAt ?? new Date(),
-                dateTime: result[0].dateTime ?? new Date(),
-            };
-        }
-        return undefined;
-    },
-
-    async create(match: Omit<Match, "id" | "createdAt">): Promise<Match> {
-        const [newMatch] = await db.insert(matches).values(match).returning();
-        return {
-            ...newMatch,
-            groupId: newMatch.groupId ?? undefined,
-            createdBy: newMatch.createdBy ?? undefined,
-            location: newMatch.location ?? undefined,
-            maxPlayersPerTeam: newMatch.maxPlayersPerTeam ?? undefined,
-            teamsCreated: newMatch.teamsCreated ?? undefined,
-            teamsFinalized: newMatch.teamsFinalized ?? undefined,
-            plannedTeams: newMatch.plannedTeams ?? undefined,
-            createdAt: newMatch.createdAt ?? new Date(),
-            dateTime: newMatch.dateTime ?? new Date(),
-        };
-    },
-
-    async update(id: string, updates: Partial<Omit<Match, "id" | "createdAt">>): Promise<Match | undefined> {
-        const [updatedMatch] = await db.update(matches).set(updates).where(eq(matches.id, id)).returning();
-        if (updatedMatch) {
-            return {
-                ...updatedMatch,
-                groupId: updatedMatch.groupId ?? undefined,
-                createdBy: updatedMatch.createdBy ?? undefined,
-                location: updatedMatch.location ?? undefined,
-                maxPlayersPerTeam: updatedMatch.maxPlayersPerTeam ?? undefined,
-                teamsCreated: updatedMatch.teamsCreated ?? undefined,
-                teamsFinalized: updatedMatch.teamsFinalized ?? undefined,
-                plannedTeams: updatedMatch.plannedTeams ?? undefined,
-                createdAt: updatedMatch.createdAt ?? new Date(),
-                dateTime: updatedMatch.dateTime ?? new Date(),
-            };
-        }
-        return undefined;
-    },
-
-    async delete(id: string): Promise<void> {
-        await db.delete(matches).where(eq(matches.id, id));
-    },
-
-    async getMatchesByGroupIds(groupIds: string[]): Promise<{ upcoming: Match[]; past: Match[] }> {
-        const result = await db
-            .select()
+        // First get matches
+        const matchesData = await db.select({
+            id: matches.id,
+            dateTime: matches.dateTime,
+            location: matches.location,
+            maxPlayersPerTeam: matches.maxPlayersPerTeam,
+            plannedTeams: matches.plannedTeams,
+            teamsCreated: matches.teamsCreated,
+            teamsFinalized: matches.teamsFinalized,
+            createdAt: matches.createdAt,
+            createdBy: matches.createdBy,
+            groupId: matches.groupId,
+        })
             .from(matches)
-            .where(inArray(matches.groupId, groupIds));
+            .where(inArray(matches.groupId, groupIds))
+            .orderBy(matches.dateTime)
+            .limit(50);
+
+        // Then get match players for all matches
+        const matchIds = matchesData.map(m => m.id);
+        const allMatchPlayers = matchIds.length > 0
+            ? await db.select({
+                id: matchPlayers.id,
+                matchId: matchPlayers.matchId,
+                teamPlayerId: matchPlayers.teamPlayerId,
+                guestName: matchPlayers.guestName,
+            })
+                .from(matchPlayers)
+                .where(inArray(matchPlayers.matchId, matchIds))
+            : [];
+
+        // Combine the data
+        const matchesWithPlayers = matchesData.map(match => ({
+            ...match,
+            matchPlayers: allMatchPlayers.filter(mp => mp.matchId === match.id)
+        }));
 
         const now = new Date();
-        const upcoming = result.map(match => ({
-            ...match,
-            groupId: match.groupId ?? undefined,
-            createdBy: match.createdBy ?? undefined,
-            location: match.location ?? undefined,
-            maxPlayersPerTeam: match.maxPlayersPerTeam ?? undefined,
-            teamsCreated: match.teamsCreated ?? undefined,
-            teamsFinalized: match.teamsFinalized ?? undefined,
-            plannedTeams: match.plannedTeams ?? undefined,
-            createdAt: match.createdAt ?? new Date(),
-            dateTime: match.dateTime ?? new Date(),
-        })).filter(match => new Date(match.dateTime) > now);
-
-        const past = result.map(match => ({
-            ...match,
-            groupId: match.groupId ?? undefined,
-            createdBy: match.createdBy ?? undefined,
-            location: match.location ?? undefined,
-            maxPlayersPerTeam: match.maxPlayersPerTeam ?? undefined,
-            teamsCreated: match.teamsCreated ?? undefined,
-            teamsFinalized: match.teamsFinalized ?? undefined,
-            plannedTeams: match.plannedTeams ?? undefined,
-            createdAt: match.createdAt ?? new Date(),
-            dateTime: match.dateTime ?? new Date(),
-        })).filter(match => new Date(match.dateTime) <= now);
+        const upcoming = matchesWithPlayers.filter((match) => {
+            const matchDate = match.dateTime instanceof Date ? match.dateTime : new Date(match.dateTime);
+            return matchDate > now;
+        });
+        const past = matchesWithPlayers.filter((match) => {
+            const matchDate = match.dateTime instanceof Date ? match.dateTime : new Date(match.dateTime);
+            return matchDate <= now;
+        });
 
         return { upcoming, past };
     },
+
+    async fetchMatchesByGroupId(groupId: string) {
+        // First get matches
+        const matchesData = await db.select({
+            id: matches.id,
+            dateTime: matches.dateTime,
+            location: matches.location,
+            maxPlayersPerTeam: matches.maxPlayersPerTeam,
+            plannedTeams: matches.plannedTeams,
+            teamsCreated: matches.teamsCreated,
+            teamsFinalized: matches.teamsFinalized,
+            createdAt: matches.createdAt,
+            createdBy: matches.createdBy,
+            groupId: matches.groupId,
+        })
+            .from(matches)
+            .where(eq(matches.groupId, groupId))
+            .orderBy(matches.dateTime)
+            .limit(50);
+
+        // Then get match players for all matches
+        const matchIds = matchesData.map(m => m.id);
+        const allMatchPlayers = matchIds.length > 0
+            ? await db.select({
+                id: matchPlayers.id,
+                matchId: matchPlayers.matchId,
+                teamPlayerId: matchPlayers.teamPlayerId,
+                guestName: matchPlayers.guestName,
+            })
+                .from(matchPlayers)
+                .where(inArray(matchPlayers.matchId, matchIds))
+            : [];
+
+        // Combine the data
+        return matchesData.map(match => ({
+            ...match,
+            matchPlayers: allMatchPlayers.filter(mp => mp.matchId === match.id)
+        }));
+    },
+
+    async createMatch(data: {
+        groupId: string;
+        createdBy: string;
+        dateTime: Date;
+        location: string | null;
+        maxPlayersPerTeam: number;
+        plannedTeams: number;
+    }) {
+        const [match] = await db.insert(matches).values({
+            groupId: data.groupId,
+            createdBy: data.createdBy,
+            dateTime: data.dateTime,
+            location: data.location,
+            maxPlayersPerTeam: data.maxPlayersPerTeam,
+            plannedTeams: data.plannedTeams,
+            teamsCreated: false,
+            teamsFinalized: false,
+        }).returning();
+
+        return match;
+    }
 };

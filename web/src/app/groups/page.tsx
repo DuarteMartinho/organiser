@@ -1,15 +1,8 @@
-import { createClient } from '@/lib/supabase/server'
-import { redirect } from 'next/navigation'
+import { requireAuth } from '@/lib/auth/server'
 import GroupsPageClient from '@/components/groups/groups-page-client'
 
 export default async function GroupsPage() {
-  const supabase = await createClient()
-  
-  const { data: { user } } = await supabase.auth.getUser()
-  
-  if (!user) {
-    redirect('/')
-  }
+  const session = await requireAuth()
 
-  return <GroupsPageClient userId={user.id} />
+  return <GroupsPageClient userId={session.user.id} />
 }

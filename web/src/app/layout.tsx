@@ -1,6 +1,8 @@
 import { Metadata } from 'next'
 import { Inter } from 'next/font/google'
 import './globals.css'
+import { ToastProvider } from '@/components/toast-provider'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 
 const inter = Inter({ subsets: ['latin'] })
 
@@ -18,6 +20,8 @@ export default function RootLayout({
     <html lang="en" suppressHydrationWarning>
       <body className={inter.className}>
         {children}
+        <ToastProvider />
+        <ConfirmDialog />
       </body>
     </html>
   )
