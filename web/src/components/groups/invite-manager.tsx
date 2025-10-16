@@ -1,16 +1,20 @@
 'use client'
 
-import { createClient } from '@/lib/supabase/client'
+import { authClient } from '@/lib/auth-client'
 import { useState, useEffect, useCallback } from 'react'
+import { fetchInvitesAction } from '@/actions/invites/fetch-invites'
+import { createInviteAction } from '@/actions/invites/create-invite'
+import { deactivateInviteAction } from '@/actions/invites/deactivate-invite'
+import { useToast } from '@/hooks/useToast'
 
 interface GroupInvite {
   id: string
   code: string
-  max_uses: number
-  used_count: number
-  expires_at: string | null
-  is_active: boolean
-  created_at: string
+  maxUses: number | null
+  usedCount: number | null
+  expiresAt: Date | null
+  isActive: boolean | null
+  createdAt: Date | null
 }
 
 interface InviteManagerProps {
@@ -20,6 +24,7 @@ interface InviteManagerProps {
 }
 
 export default function InviteManager({ groupId, groupName, isAdmin }: InviteManagerProps) {
+  const toast = useToast()
   const [invites, setInvites] = useState<GroupInvite[]>([])
   const [loading, setLoading] = useState(false)
   const [creating, setCreating] = useState(false)
@@ -29,8 +34,6 @@ export default function InviteManager({ groupId, groupName, isAdmin }: InviteMan
   const [maxUses, setMaxUses] = useState(1)
   const [expirationHours, setExpirationHours] = useState(24)
   const [hasExpiration, setHasExpiration] = useState(true)
-
-  const supabase = createClient()
 
   const generateInviteCode = () => {
     // Generate a secure, user-friendly code
@@ -45,25 +48,21 @@ export default function InviteManager({ groupId, groupName, isAdmin }: InviteMan
   const createInvite = async () => {
     setCreating(true)
     try {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) throw new Error('Not authenticated')
+      const { data: session } = await authClient.getSession()
+      if (!session?.user) throw new Error('Not authenticated')
 
       const code = generateInviteCode()
       const expiresAt = hasExpiration 
-        ? new Date(Date.now() + expirationHours * 60 * 60 * 1000).toISOString()
+        ? new Date(Date.now() + expirationHours * 60 * 60 * 1000)
         : null
 
-      const { error } = await supabase
-        .from('group_invites')
-        .insert({
-          group_id: groupId,
-          created_by: user.id,
-          code,
-          max_uses: maxUses,
-          expires_at: expiresAt,
-        })
-
-      if (error) throw error
+      await createInviteAction({
+        groupId,
+        createdBy: session.user.id,
+        code,
+        maxUses,
+        expiresAt
+      })
 
       await fetchInvites()
       setShowCreateForm(false)
@@ -72,8 +71,9 @@ export default function InviteManager({ groupId, groupName, isAdmin }: InviteMan
       setMaxUses(1)
       setExpirationHours(24)
       setHasExpiration(true)
+      toast.success('Invite code created successfully!')
     } catch (error: any) {
-      alert('Error creating invite: ' + error.message)
+      toast.error('Error creating invite: ' + error.message)
     } finally {
       setCreating(false)
     }
@@ -81,35 +81,26 @@ export default function InviteManager({ groupId, groupName, isAdmin }: InviteMan
 
   const deactivateInvite = async (inviteId: string) => {
     try {
-      const { error } = await supabase
-        .from('group_invites')
-        .update({ is_active: false })
-        .eq('id', inviteId)
-
-      if (error) throw error
+      await deactivateInviteAction(inviteId)
       await fetchInvites()
+      toast.success('Invite deactivated successfully!')
     } catch (error: any) {
-      alert('Error deactivating invite: ' + error.message)
+      toast.error('Error deactivating invite: ' + error.message)
     }
   }
 
   const fetchInvites = useCallback(async () => {
     setLoading(true)
     try {
-      const { data, error } = await supabase
-        .from('group_invites')
-        .select('*')
-        .eq('group_id', groupId)
-        .order('created_at', { ascending: false })
-
-      if (error) throw error
-      setInvites(data || [])
+      const data = await fetchInvitesAction(groupId)
+      setInvites(data)
     } catch (error: any) {
       console.error('Error fetching invites:', error)
+      setInvites([])
     } finally {
       setLoading(false)
     }
-  }, [groupId, supabase])
+  }, [groupId])
 
   useEffect(() => {
     if (isAdmin) {
@@ -231,10 +222,10 @@ export default function InviteManager({ groupId, groupName, isAdmin }: InviteMan
                       </button>
                     </div>
                     <div className="text-xs text-gray-500 mt-1">
-                      Used: {invite.used_count}/{invite.max_uses === -1 ? '∞' : invite.max_uses}
-                      {invite.expires_at && (
+                      Used: {invite.usedCount ?? 0}/{invite.maxUses === -1 ? '∞' : invite.maxUses ?? 0}
+                      {invite.expiresAt && (
                         <span className="ml-2">
-                          Expires: {new Date(invite.expires_at).toLocaleDateString()}
+                          Expires: {new Date(invite.expiresAt).toLocaleDateString()}
                         </span>
                       )}
                     </div>
@@ -242,12 +233,12 @@ export default function InviteManager({ groupId, groupName, isAdmin }: InviteMan
                   
                   <div className="flex items-center space-x-2">
                     <span className={`px-2 py-1 text-xs rounded-full ${
-                      invite.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                      invite.isActive ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
                     }`}>
-                      {invite.is_active ? 'Active' : 'Inactive'}
+                      {invite.isActive ? 'Active' : 'Inactive'}
                     </span>
                     
-                    {invite.is_active && (
+                    {invite.isActive && (
                       <button
                         onClick={() => deactivateInvite(invite.id)}
                         className="text-red-600 hover:text-red-800 text-sm"

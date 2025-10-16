@@ -1,8 +1,13 @@
 'use client'
 
-import { createClient } from '@/lib/supabase/client'
 import { useState, useEffect, useCallback } from 'react'
 import UserEditModal from './user-edit-modal'
+import { removeMemberAction } from '@/actions/group-members/remove-member'
+import { fetchUserDetailsAction } from '@/actions/user-details/fetch-user-details'
+import { promoteToAdminAction } from '@/actions/user-details/promote-to-admin'
+import { demoteAdminAction } from '@/actions/user-details/demote-admin'
+import { useToast } from '@/hooks/useToast'
+import { useConfirm } from '@/hooks/useConfirm'
 
 interface UserDetailsSidebarProps {
   isOpen: boolean
@@ -17,15 +22,16 @@ interface UserDetailsSidebarProps {
 
 interface UserDetails {
   id: string
-  name: string
-  email: string
-  joined_at: string
+  name: string | null
+  email: string | null
+  joinedAt: Date | null
   teamPlayer: {
-    rating: number
-    is_key_player: boolean
-    preferred_position: string
-    role: string
-    created_at: string
+    id: string
+    rating: number | null
+    isKeyPlayer: boolean | null
+    preferredPosition: string | null
+    role: string | null
+    createdAt: Date | null
   } | null
   isAdmin: boolean
   matchStats: {
@@ -45,11 +51,12 @@ export default function UserDetailsSidebar({
   currentUserId,
   onMemberUpdate
 }: UserDetailsSidebarProps) {
+  const toast = useToast()
+  const confirm = useConfirm()
   const [userDetails, setUserDetails] = useState<UserDetails | null>(null)
   const [loading, setLoading] = useState(true)
   const [mounted, setMounted] = useState(false)
   const [isEditing, setIsEditing] = useState(false)
-  const supabase = createClient()
 
   useEffect(() => {
     setMounted(true)
@@ -61,170 +68,55 @@ export default function UserDetailsSidebar({
     setLoading(true)
     
     try {
-      // Get user basic info and membership
-      const { data: memberData, error: memberError } = await supabase
-        .from('group_members')
-        .select(`
-          group_id,
-          user_id,
-          joined_at,
-          users!inner (
-            id,
-            name,
-            email
-          )
-        `)
-        .eq('group_id', groupId)
-        .eq('user_id', userId)
-        .single()
-
-      console.log('Member data result:', { memberData, memberError })
-      if (memberError) throw new Error(`Member query failed: ${memberError.message}`)
-
-      // Get team player info
-      const { data: teamPlayerData, error: teamPlayerError } = await supabase
-        .from('team_players')
-        .select('*')
-        .eq('group_id', groupId)
-        .eq('user_id', userId)
-        .single()
-
-      console.log('Team player data result:', { teamPlayerData, teamPlayerError })
-      // Don't throw error if no team player record exists
-      if (teamPlayerError && teamPlayerError.code !== 'PGRST116') {
-        console.warn('Team player query error (non-fatal):', teamPlayerError)
-      }
-
-      // Check if user is admin
-      const { data: adminData, error: adminError } = await supabase
-        .from('group_admins')
-        .select('user_id')
-        .eq('group_id', groupId)
-        .eq('user_id', userId)
-        .single()
-
-      console.log('Admin data result:', { adminData, adminError })
-      // Don't throw error if user is not an admin
-      if (adminError && adminError.code !== 'PGRST116') {
-        console.warn('Admin query error (non-fatal):', adminError)
-      }
-
-      // Get match stats - need to find team_player id first
-      const teamPlayerId = teamPlayerData?.id
-      let matchStatsData = null
-      
-      if (teamPlayerId) {
-        const { data: statsData } = await supabase
-          .from('player_match_stats')
-          .select('goals, assists')
-          .eq('team_player_id', teamPlayerId)
-        matchStatsData = statsData
-      }
-
-      const totalGoals = matchStatsData?.reduce((sum: number, stat: any) => sum + (stat.goals || 0), 0) || 0
-      const totalAssists = matchStatsData?.reduce((sum: number, stat: any) => sum + (stat.assists || 0), 0) || 0
-
-      // Normalize users object (Supabase may return users as an array when using joins)
-      const usersObj = Array.isArray(memberData.users) ? memberData.users[0] : (memberData.users || { id: '', name: '', email: '' })
-
-      setUserDetails({
-        id: memberData.user_id,
-        name: usersObj.name,
-        email: usersObj.email,
-        joined_at: memberData.joined_at,
-        teamPlayer: teamPlayerData,
-        isAdmin: !!adminData,
-        matchStats: {
-          totalMatches: matchStatsData?.length || 0,
-          goals: totalGoals,
-          assists: totalAssists
-        }
-      })
-      
-      console.log('User details set successfully:', {
-        userId: memberData.user_id,
-        name: usersObj.name,
-        hasTeamPlayer: !!teamPlayerData,
-        isAdmin: !!adminData
-      })
+      const details = await fetchUserDetailsAction(userId, groupId)
+      setUserDetails(details)
     } catch (error) {
       console.error('Error fetching user details:', error)
-      console.error('Error details:', {
-        message: error instanceof Error ? error.message : 'Unknown error',
-        userId,
-        groupId
-      })
       setUserDetails(null)
     } finally {
       setLoading(false)
     }
-  }, [isOpen, userId, groupId, supabase])
+  }, [isOpen, userId, groupId])
 
   const promoteToAdmin = async () => {
     try {
-      const { error } = await supabase
-        .from('group_admins')
-        .insert({
-          group_id: groupId,
-          user_id: userId
-        })
-
-      if (error) throw error
-
-      await supabase
-        .from('team_players')
-        .update({ role: 'admin' })
-        .eq('group_id', groupId)
-        .eq('user_id', userId)
-
+      await promoteToAdminAction(groupId, userId)
       await fetchUserDetails()
       onMemberUpdate()
-      alert('User promoted to admin successfully!')
+      toast.success('User promoted to admin successfully!')
     } catch (error: any) {
-      alert('Error promoting user: ' + error.message)
+      toast.error('Error promoting user: ' + error.message)
     }
   }
 
   const demoteAdmin = async () => {
     try {
-      const { error } = await supabase
-        .from('group_admins')
-        .delete()
-        .eq('group_id', groupId)
-        .eq('user_id', userId)
-
-      if (error) throw error
-
-      await supabase
-        .from('team_players')
-        .update({ role: 'player' })
-        .eq('group_id', groupId)
-        .eq('user_id', userId)
-
+      await demoteAdminAction(groupId, userId)
       await fetchUserDetails()
       onMemberUpdate()
-      alert('Admin privileges removed successfully!')
+      toast.success('Admin privileges removed successfully!')
     } catch (error: any) {
-      alert('Error demoting admin: ' + error.message)
+      toast.error('Error demoting admin: ' + error.message)
     }
   }
 
   const removeMember = async () => {
-    if (!confirm(`Are you sure you want to remove ${userDetails?.name} from this group?`)) return
+    const confirmed = await confirm({
+      title: 'Remove Member',
+      message: `Are you sure you want to remove ${userDetails?.name} from this group?`,
+      confirmText: 'Remove',
+      variant: 'danger',
+    })
+    
+    if (!confirmed) return
 
     try {
-      // Clean removal process
-      await supabase.from('team_players').delete().eq('group_id', groupId).eq('user_id', userId)
-      await supabase.from('group_admins').delete().eq('group_id', groupId).eq('user_id', userId)
-      await supabase.from('match_waiting_list').delete().eq('team_player_id', userId)
-      await supabase.from('match_players').delete().eq('team_player_id', userId)
-      await supabase.from('group_members').delete().eq('group_id', groupId).eq('user_id', userId)
-
+      await removeMemberAction(groupId, userId)
       onMemberUpdate()
       onClose()
-      alert('Member removed successfully!')
+      toast.success('Member removed successfully!')
     } catch (error: any) {
-      alert('Error removing member: ' + error.message)
+      toast.error('Error removing member: ' + error.message)
     }
   }
 
@@ -312,13 +204,13 @@ export default function UserDetailsSidebar({
                     </span>
                   )}
                   {/* Check if this is a guest user */}
-                  {userDetails.email.includes('@temp.local') && (
+                  {userDetails.email && userDetails.email.includes('@temp.local') && (
                     <span className="px-2 py-1 text-xs bg-orange-100 text-orange-800 rounded-full">
                       Guest
                     </span>
                   )}
                   {/* Only show Key Player tag to admins/owners */}
-                  {isCurrentUserAdmin && userDetails.teamPlayer?.is_key_player && (
+                  {isCurrentUserAdmin && userDetails.teamPlayer?.isKeyPlayer && (
                     <span className="px-2 py-1 text-xs bg-yellow-100 text-yellow-800 rounded-full">
                       Key Player
                     </span>
@@ -327,7 +219,7 @@ export default function UserDetailsSidebar({
                 
                 {/* Member joined date - always visible */}
                 <div className="mt-3 text-sm text-gray-500">
-                  Joined: {mounted ? new Date(userDetails.joined_at).toLocaleDateString('en-US', {
+                  Joined: {mounted && userDetails.joinedAt ? new Date(userDetails.joinedAt).toLocaleDateString('en-US', {
                     month: 'short',
                     day: 'numeric',
                     year: 'numeric'
@@ -346,7 +238,7 @@ export default function UserDetailsSidebar({
                     </div>
                     <div>
                       <span className="text-gray-500">Position</span>
-                      <p className="font-medium">{userDetails.teamPlayer.preferred_position}</p>
+                      <p className="font-medium">{userDetails.teamPlayer.preferredPosition || 'Not set'}</p>
                     </div>
                     <div>
                       <span className="text-gray-500">Role</span>

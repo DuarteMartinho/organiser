@@ -1,7 +1,8 @@
 'use client'
 
-import { createClient } from '@/lib/supabase/client'
 import { useState } from 'react'
+import { updateGroupAction } from '@/actions/groups/update-group'
+import { useToast } from '@/hooks/useToast'
 
 interface GroupEditModalProps {
   isOpen: boolean
@@ -23,11 +24,11 @@ export default function GroupEditModal({
   isAdmin, 
   onGroupUpdated 
 }: GroupEditModalProps) {
+  const toast = useToast()
   const [name, setName] = useState(group.name)
   const [description, setDescription] = useState(group.description || '')
   const [privacy, setPrivacy] = useState(group.privacy)
   const [loading, setLoading] = useState(false)
-  const supabase = createClient()
 
   if (!isAdmin || !isOpen) return null
 
@@ -35,31 +36,24 @@ export default function GroupEditModal({
     e.preventDefault()
     
     if (!name.trim()) {
-      alert('Group name is required')
+      toast.warning('Group name is required')
       return
     }
 
     setLoading(true)
     try {
-      const { data: updatedGroup, error } = await supabase
-        .from('groups')
-        .update({
-          name: name.trim(),
-          description: description.trim() || null,
-          privacy: privacy
-        })
-        .eq('id', group.id)
-        .select()
-        .single()
-
-      if (error) throw error
+      const updatedGroup = await updateGroupAction(group.id, {
+        name: name.trim(),
+        description: description.trim() || null,
+        privacy: privacy
+      })
 
       onGroupUpdated(updatedGroup)
       onClose()
-      alert('Group updated successfully!')
+      toast.success('Group updated successfully!')
     } catch (error: any) {
       console.error('Error updating group:', error)
-      alert('Error updating group: ' + error.message)
+      toast.error('Error updating group: ' + error.message)
     } finally {
       setLoading(false)
     }

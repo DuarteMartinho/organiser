@@ -1,8 +1,23 @@
 'use client'
 
-import { createClient } from '@/lib/supabase/client'
 import { useState, useEffect, useCallback } from 'react'
 import SearchableSelect from '@/components/ui/searchable-select'
+import { fetchMatchDetailsAction } from '@/actions/match-details/fetch-match-details'
+import { fetchWaitingListAction } from '@/actions/match-details/fetch-waiting-list'
+import { fetchAvailableMembersAction } from '@/actions/match-details/fetch-available-members'
+import { createTeamsAction } from '@/actions/match-details/create-teams'
+import { assignPlayerToTeamAction } from '@/actions/match-details/assign-player-to-team'
+import { removePlayerFromMatchAction } from '@/actions/match-details/remove-player-from-match'
+import { finalizeTeamsAction } from '@/actions/match-details/finalize-teams'
+import { deleteMatchAction } from '@/actions/match-details/delete-match'
+import { randomizeTeamsAction } from '@/actions/match-details/randomize-teams'
+import { addMatchPlayerAction } from '@/actions/match-players/add-match-player'
+import { getTeamPlayerAction } from '@/actions/team-players/get-team-player'
+import { addToWaitingListAction } from '@/actions/match-waiting-list/add-to-waiting-list'
+import { deleteFromWaitingListAction } from '@/actions/match-waiting-list/delete-waiting-list'
+import { deleteMatchPlayerAction } from '@/actions/match-players/delete-match-player'
+import { useToast } from '@/hooks/useToast'
+import { useConfirm } from '@/hooks/useConfirm'
 
 interface MatchDetailsProps {
   matchId: string
@@ -14,73 +29,75 @@ interface MatchDetailsProps {
 
 interface Team {
   id: string
-  name: string
-  match_players: Array<{
+  name: string | null
+  matchPlayers: Array<{
     id: string
-    team_player_id: string | null
-    guest_name: string | null
-    joined_at: string
-    team_players?: {
+    teamPlayerId: string | null
+    guestName: string | null
+    joinedAt: Date | null
+    teamPlayers?: {
       users: {
-        id: string
-        name: string
-        email: string
+        id: string | null
+        name: string | null
+        email: string | null
       }
-      rating: number
-      preferred_position: string
-      is_key_player: boolean
-    }
+      rating: number | null
+      preferredPosition: string | null
+      isKeyPlayer: boolean | null
+    } | null
   }>
 }
 
 interface MatchPlayer {
   id: string
-  team_player_id: string | null
-  guest_name: string | null
-  joined_at: string
-  team_players?: {
+  teamPlayerId: string | null
+  guestName: string | null
+  joinedAt: Date | null
+  teamPlayers?: {
     users: {
-      id: string
-      name: string
-      email: string
+      id: string | null
+      name: string | null
+      email: string | null
     }
-    rating: number
-    preferred_position: string
-    is_key_player: boolean
-  }
+    rating: number | null
+    preferredPosition: string | null
+    isKeyPlayer: boolean | null
+  } | null
 }
 
 interface Match {
   id: string
-  date_time: string
+  dateTime: Date | string | null
   location: string | null
-  max_players_per_team: number
-  planned_teams: number
-  created_at: string
-  created_by: string
-  teams_created: boolean
-  teams_finalized: boolean
+  maxPlayersPerTeam: number | null
+  plannedTeams: number | null
+  createdAt: Date | null
+  createdBy: string | null
+  teamsCreated: boolean | null
+  teamsFinalized: boolean | null
   teams: Team[]
-  match_players: MatchPlayer[]
+  matchPlayers: MatchPlayer[]
 }
 
 interface WaitingListPlayer {
   id: string
-  team_player_id: string
-  joined_at: string
-  team_players: {
+  teamPlayerId: string | null
+  joinedAt: Date | null
+  teamPlayers: {
     users: {
-      id: string
-      name: string
-      email: string
+      id: string | null
+      name: string | null
+      email: string | null
     }
-    rating: number
-    preferred_position: string
-    is_key_player: boolean
+    rating: number | null
+    preferredPosition: string | null
+    isKeyPlayer: boolean | null
   }
 }
 
 export default function MatchDetails({ matchId, onClose, isAdmin, currentUserId, groupId }: MatchDetailsProps) {
+  const toast = useToast()
+  const confirm = useConfirm()
   const [match, setMatch] = useState<Match | null>(null)
   const [waitingList, setWaitingList] = useState<WaitingListPlayer[]>([])
   const [loading, setLoading] = useState(true)
@@ -90,13 +107,12 @@ export default function MatchDetails({ matchId, onClose, isAdmin, currentUserId,
   const [showAddGuest, setShowAddGuest] = useState(false)
   const [showGuestModal, setShowGuestModal] = useState(false)
   const [selectedGuestMember, setSelectedGuestMember] = useState<string>('')
-  const [availableMembers, setAvailableMembers] = useState<Array<{id: string, name: string, email: string}>>([])  
+  const [availableMembers, setAvailableMembers] = useState<Array<{id: string, name: string, email: string, teamPlayerId?: string}>>([])  
   const [creatingTeams, setCreatingTeams] = useState(false)
   const [finalizingTeams, setFinalizingTeams] = useState(false)
   const [randomizingTeams, setRandomizingTeams] = useState(false)
   const [deletingMatch, setDeletingMatch] = useState(false)
   const [addingGuest, setAddingGuest] = useState<string | null>(null) // Track which guest is being added
-  const supabase = createClient()
 
   useEffect(() => {
     setMounted(true)
@@ -104,649 +120,398 @@ export default function MatchDetails({ matchId, onClose, isAdmin, currentUserId,
 
   const fetchAvailableMembers = useCallback(async () => {
     try {
-      // Get all group members
-      const { data: allMembers, error: membersError } = await supabase
-        .from('team_players')
-        .select(`
-          id,
-          users (
-            id,
-            name,
-            email
-          )
-        `)
-        .eq('group_id', groupId)
-
-      if (membersError) throw membersError
-
-      // Get current match participants (both registered and in waiting list)
-      const { data: matchParticipants, error: participantsError } = await supabase
-        .from('match_players')
-        .select('team_player_id')
-        .eq('match_id', matchId)
-        .not('team_player_id', 'is', null)
-
-      if (participantsError) throw participantsError
-
-      const { data: waitingParticipants, error: waitingError } = await supabase
-        .from('match_waiting_list')
-        .select('team_player_id')
-        .eq('match_id', matchId)
-
-      if (waitingError) throw waitingError
-
-      // Filter out members who are already participating or on waiting list
-      const participantIds = [
-        ...(matchParticipants?.map((p: any) => p.team_player_id) || []),
-        ...(waitingParticipants?.map((p: any) => p.team_player_id) || [])
-      ]
-
-      const available = allMembers?.filter((member: any) => 
-        !participantIds.includes(member.id)
-      ).map((member: any) => ({
-        id: member.id,
-        name: member.users.name,
-        email: member.users.email
-      })) || []
-
+      const available = await fetchAvailableMembersAction(groupId, matchId)
       setAvailableMembers(available)
     } catch (error) {
       console.error('Error fetching available members:', error)
     }
-  }, [groupId, matchId, supabase])
+  }, [groupId, matchId])
+
+  const filterAvailableMembers = useCallback(() => {
+    if (!match) return availableMembers
+
+    // Get all team player IDs already in the match
+    const matchPlayerIds = new Set(
+      match.matchPlayers?.map(player => player.teamPlayerId).filter(Boolean) || []
+    )
+
+    // Get all team player IDs on the waiting list
+    const waitingListPlayerIds = new Set(
+      waitingList.map(player => player.teamPlayerId).filter(Boolean)
+    )
+
+    // Filter out members who are already in match or waiting list
+    return availableMembers.filter(member => {
+      const isInMatch = member.teamPlayerId && matchPlayerIds.has(member.teamPlayerId)
+      const isInWaitingList = member.teamPlayerId && waitingListPlayerIds.has(member.teamPlayerId)
+      return !isInMatch && !isInWaitingList
+    })
+  }, [availableMembers, match, waitingList])
 
   const fetchMatchDetails = useCallback(async () => {
     try {
       // Fetch match with teams and players
-      const { data: matchData, error: matchError } = await supabase
-        .from('matches')
-        .select(`
-          *,
-          teams (
-            id,
-            name,
-            match_players (
-              id,
-              team_player_id,
-              guest_name,
-              joined_at,
-              team_players (
-                users (
-                  id,
-                  name,
-                  email
-                ),
-                rating,
-                preferred_position,
-                is_key_player
-              )
-            )
-          ),
-          match_players!match_id (
-            id,
-            team_player_id,
-            guest_name,
-            joined_at,
-            team_players (
-              users (
-                id,
-                name,
-                email
-              ),
-              rating,
-              preferred_position,
-              is_key_player
-            )
-          )
-        `)
-        .eq('id', matchId)
-        .single()
-
-      if (matchError) throw matchError
-
-      // Fetch waiting list
-      const { data: waitingData, error: waitingError } = await supabase
-        .from('match_waiting_list')
-        .select(`
-          id,
-          team_player_id,
-          joined_at,
-          team_players (
-            users (
-              id,
-              name,
-              email
-            ),
-            rating,
-            preferred_position,
-            is_key_player
-          )
-        `)
-        .eq('match_id', matchId)
-        .order('joined_at', { ascending: true })
-
-      if (waitingError) throw waitingError
-
+      const matchData = await fetchMatchDetailsAction(matchId)
       setMatch(matchData)
 
-      // Normalize waitingData shape (Supabase may return nested arrays for joins)
-      const normalizedWaiting: WaitingListPlayer[] = (waitingData || []).map((w: any) => {
-        // team_players may come back as an array or object; normalize to a single object
-        const rawTeamPlayers = w.team_players
-        let tp: any = null
+      // Fetch waiting list
+      const waitingData = await fetchWaitingListAction(matchId)
+      setWaitingList(waitingData)
 
-        if (Array.isArray(rawTeamPlayers)) {
-          tp = rawTeamPlayers[0]
-        } else if (rawTeamPlayers && Array.isArray(rawTeamPlayers.users)) {
-          // some responses nest users as an array inside team_players
-          tp = {
-            users: rawTeamPlayers.users[0],
-            rating: rawTeamPlayers.rating,
-            preferred_position: rawTeamPlayers.preferred_position,
-            is_key_player: rawTeamPlayers.is_key_player
-          }
-        } else {
-          tp = rawTeamPlayers || null
-        }
-
-        const usersObj = tp?.users && Array.isArray(tp.users) ? tp.users[0] : tp?.users || { id: '', name: '', email: '' }
-
-        return {
-          id: w.id,
-          team_player_id: w.team_player_id,
-          joined_at: w.joined_at,
-          team_players: {
-            users: usersObj,
-            rating: tp?.rating ?? 0,
-            preferred_position: tp?.preferred_position ?? '',
-            is_key_player: !!tp?.is_key_player
-          }
-        }
-      })
-
-      setWaitingList(normalizedWaiting)
-
-  // Fetch available members for guest selection
-  await fetchAvailableMembers()
+      // Fetch available members for guest selection
+      await fetchAvailableMembers()
     } catch (error) {
       console.error('Error fetching match details:', error)
     } finally {
       setLoading(false)
     }
-  }, [matchId, supabase, fetchAvailableMembers])
+  }, [matchId, fetchAvailableMembers])
 
   useEffect(() => {
     fetchMatchDetails()
   }, [fetchMatchDetails])
 
+  const moveWaitingListToMatch = async () => {
+    try {
+      // Fetch fresh data to get accurate counts
+      const matchData = await fetchMatchDetailsAction(matchId)
+      const waitingData = await fetchWaitingListAction(matchId)
+
+      if (!matchData || matchData.teamsCreated) return
+
+      // Calculate available spots with fresh data
+      const totalSpots = (matchData.plannedTeams || 2) * (matchData.maxPlayersPerTeam || 11)
+      const currentPlayers = matchData.matchPlayers?.length || 0
+      const availableSpots = totalSpots - currentPlayers
+
+      if (availableSpots <= 0 || waitingData.length === 0) return
+
+      // Sort waiting list by joinedAt (FIFO - earliest first)
+      const sortedWaitingList = [...waitingData].sort((a, b) => {
+        const dateA = a.joinedAt ? new Date(a.joinedAt).getTime() : 0
+        const dateB = b.joinedAt ? new Date(b.joinedAt).getTime() : 0
+        return dateA - dateB
+      })
+
+      // Move first player from sorted waiting list to match
+      const firstWaitingPlayer = sortedWaitingList[0]
+      
+      // Add to match
+      await addMatchPlayerAction({
+        matchId,
+        teamPlayerId: firstWaitingPlayer.teamPlayerId || '',
+        teamId: null,
+        guestName: null,
+      })
+
+      // Remove from waiting list
+      await deleteFromWaitingListAction(matchId, firstWaitingPlayer.teamPlayerId || '')
+
+      toast.success(`${firstWaitingPlayer.teamPlayers.users.name} moved from waiting list to match!`)
+      
+      // Refresh component state
+      await fetchMatchDetails()
+      
+      // Recursively check if more players can be moved
+      if (availableSpots > 1) {
+        await moveWaitingListToMatch()
+      }
+    } catch (error: any) {
+      console.error('Error moving player from waiting list:', error)
+    }
+  }
+
   const joinMatch = async () => {
     setJoining(true)
     try {
-      // Get current user's team_player record
-      const { data: teamPlayerData, error: teamPlayerError } = await supabase
-        .from('team_players')
-        .select('id')
-        .eq('user_id', currentUserId)
-        .eq('group_id', groupId)
-        .single()
-
-      if (teamPlayerError) throw teamPlayerError
+      const teamPlayer = await getTeamPlayerAction(currentUserId, groupId)
+      if (!teamPlayer) throw new Error('You must be a member of this group')
 
       if (!match) throw new Error('Match not found')
 
       // Calculate total spots and current players
-      const totalSpots = (match.teams?.length || 0) * match.max_players_per_team
-      const currentPlayers = match.match_players?.length || 0
+      const totalSpots = (match.plannedTeams || 2) * (match.maxPlayersPerTeam || 11)
+      const currentPlayers = match.matchPlayers?.length || 0
 
-      if (match.teams_finalized) {
-        alert('This match is finalized. No more players can join.')
+      if (match.teamsFinalized) {
+        toast.warning('This match is finalized. No more players can join.')
         return
       }
 
-      if (!match.teams_created && currentPlayers >= totalSpots) {
+      if (!match.teamsCreated && currentPlayers >= totalSpots) {
         // Join waiting list
-        const { error: waitingError } = await supabase
-          .from('match_waiting_list')
-          .insert({
-            match_id: matchId,
-            team_player_id: teamPlayerData.id
-          })
-
-        if (waitingError) throw waitingError
-        alert('Match is full! You have been added to the waiting list.')
+        await addToWaitingListAction({
+          matchId,
+          teamPlayerId: teamPlayer.id
+        })
+        toast.info('Match is full! You have been added to the waiting list.')
       } else {
         // Join the match player list
-        const { error: joinError } = await supabase
-          .from('match_players')
-          .insert({
-            match_id: matchId,
-            team_player_id: teamPlayerData.id
-          })
-
-        if (joinError) throw joinError
-        alert('Successfully joined the match!')
+        await addMatchPlayerAction({
+          matchId,
+          teamPlayerId: teamPlayer.id,
+          teamId: null,
+          guestName: null
+        })
+        toast.success('Successfully joined the match!')
       }
 
       fetchMatchDetails()
     } catch (error: any) {
       console.error('Error joining match:', error)
-      alert('Error joining match: ' + error.message)
+      toast.error('Error joining match: ' + error.message)
     } finally {
       setJoining(false)
     }
   }
 
   const leaveMatch = async () => {
-    if (!confirm('Are you sure you want to leave this match?')) return
     if (!match) return
 
-    // Prevent leaving if teams are created
-    if (match.teams_created) {
-      alert('Cannot leave match - teams have already been created!')
+    // Determine if user is on waiting list or in match
+    const onWaitingList = waitingList.some(player => 
+      player.teamPlayers.users.id === currentUserId
+    )
+
+    const confirmed = await confirm({
+      title: onWaitingList ? 'Leave Waiting List' : 'Leave Match',
+      message: onWaitingList 
+        ? 'Are you sure you want to leave the waiting list?' 
+        : 'Are you sure you want to leave this match?',
+      confirmText: 'Leave',
+      variant: 'warning',
+    })
+    
+    if (!confirmed) return
+
+    // Prevent leaving if teams are created (only for match players, not waiting list)
+    if (!onWaitingList && match.teamsCreated) {
+      toast.warning('Cannot leave match - teams have already been created!')
       return
     }
 
     try {
-      if (match?.teams_finalized) {
-        alert('This match is finalized. You cannot leave.')
+      if (!onWaitingList && match?.teamsFinalized) {
+        toast.warning('This match is finalized. You cannot leave.')
         return
       }
 
-      // Get current user's team_player record
-      const { data: teamPlayerData, error: teamPlayerError } = await supabase
-        .from('team_players')
-        .select('id')
-        .eq('user_id', currentUserId)
-        .eq('group_id', groupId)
-        .single()
-
-      if (teamPlayerError) throw teamPlayerError
+      const teamPlayer = await getTeamPlayerAction(currentUserId, groupId)
+      if (!teamPlayer) throw new Error('Team player not found')
 
       // Remove from match_players
-      const { error: leaveError } = await supabase
-        .from('match_players')
-        .delete()
-        .eq('team_player_id', teamPlayerData.id)
-        .eq('match_id', matchId)
-
-      if (leaveError) throw leaveError
+      await deleteMatchPlayerAction(teamPlayer.id, matchId)
 
       // Also remove from waiting list if they're on it
-      await supabase
-        .from('match_waiting_list')
-        .delete()
-        .eq('match_id', matchId)
-        .eq('team_player_id', teamPlayerData.id)
+      await deleteFromWaitingListAction(matchId, teamPlayer.id)
 
-      fetchMatchDetails()
-      alert('Successfully left the match!')
+      // Refresh match data first
+      await fetchMatchDetails()
+      
+      toast.success(onWaitingList ? 'Successfully left the waiting list!' : 'Successfully left the match!')
+      
+      // If player was in match (not waiting list), try to move someone from waiting list
+      if (!onWaitingList) {
+        await moveWaitingListToMatch()
+      }
     } catch (error: any) {
       console.error('Error leaving match:', error)
-      alert('Error leaving match: ' + error.message)
-    }
-  }
-
-  const moveFromWaitingList = async (waitingPlayerId: string, teamId: string) => {
-    try {
-      const waitingPlayer = waitingList.find(p => p.id === waitingPlayerId)
-      if (!waitingPlayer) return
-
-      // Add to team
-      const { error: addError } = await supabase
-        .from('match_players')
-        .insert({
-          team_id: teamId,
-          team_player_id: waitingPlayer.team_players.users.id
-        })
-
-      if (addError) throw addError
-
-      // Remove from waiting list
-      const { error: removeError } = await supabase
-        .from('match_waiting_list')
-        .delete()
-        .eq('id', waitingPlayerId)
-
-      if (removeError) throw removeError
-
-      fetchMatchDetails()
-    } catch (error: any) {
-      console.error('Error moving from waiting list:', error)
-      alert('Error moving player: ' + error.message)
+      toast.error('Error: ' + error.message)
     }
   }
 
   const removePlayer = async (playerId: string, playerName: string) => {
-    if (!confirm(`Remove ${playerName} from this match?`)) return
+    const confirmed = await confirm({
+      title: 'Remove Player',
+      message: `Remove ${playerName} from this match?`,
+      confirmText: 'Remove',
+      variant: 'warning',
+    })
+    
+    if (!confirmed) return
     if (!match) return
 
     try {
-      const { error } = await supabase
-        .from('match_players')
-        .delete()
-        .eq('id', playerId)
-
-      if (error) throw error
-
-      // Check if there's space now and move someone from waiting list
-      const totalSpots = match.planned_teams * match.max_players_per_team
-      const currentPlayers = (match.match_players?.length || 0) - 1 // Subtract the player we just removed
+      await removePlayerFromMatchAction(playerId)
       
-      if (currentPlayers < totalSpots && waitingList.length > 0) {
-        // Move first person from waiting list to match players
-        const firstWaitingPlayer = waitingList[0]
-        
-        // Add to match players using the team_player_id from the waiting list record
-        const { error: addError } = await supabase
-          .from('match_players')
-          .insert({
-            match_id: matchId,
-            team_player_id: firstWaitingPlayer.team_player_id,
-            team_id: null,
-            guest_name: null
-          })
-
-        if (addError) throw addError
-
-        // Remove from waiting list
-        const { error: removeError } = await supabase
-          .from('match_waiting_list')
-          .delete()
-          .eq('id', firstWaitingPlayer.id)
-
-        if (removeError) throw removeError
-
-        alert(`${playerName} removed from match. ${firstWaitingPlayer.team_players.users.name} has been moved from waiting list to the match!`)
-      } else {
-        alert(`${playerName} removed from match successfully!`)
-      }
-
-      fetchMatchDetails()
+      // Refresh match data first
+      await fetchMatchDetails()
+      
+      toast.success('Player removed from match successfully!')
+      
+      // Try to move someone from waiting list to fill the spot
+      await moveWaitingListToMatch()
     } catch (error: any) {
       console.error('Error removing player:', error)
-      alert('Error removing player: ' + error.message)
+      toast.error('Error removing player: ' + error.message)
     }
   }
 
-  const addGuestFromModal = async (guestId: string) => {
-    if (addingGuest === guestId) return // Prevent duplicate clicks
-    if (!match) return
+  const removeFromWaitingList = async (teamPlayerId: string, playerName: string) => {
+    const confirmed = await confirm({
+      title: 'Remove from Waiting List',
+      message: `Remove ${playerName} from the waiting list?`,
+      confirmText: 'Remove',
+      variant: 'warning',
+    })
     
-    setAddingGuest(guestId)
+    if (!confirmed) return
+
     try {
-      // Check if user is already in the match
-      const { data: existingPlayer } = await supabase
-        .from('match_players')
-        .select('id')
-        .eq('match_id', matchId)
-        .eq('team_player_id', guestId)
-        .single()
-
-      if (existingPlayer) {
-        alert('This player is already in the match!')
-        return
-      }
-
-      // Check if user is on waiting list
-      const { data: waitingPlayer } = await supabase
-        .from('match_waiting_list')
-        .select('id')
-        .eq('match_id', matchId)
-        .eq('team_player_id', guestId)
-        .single()
-
-      if (waitingPlayer) {
-        alert('This player is already on the waiting list!')
-        return
-      }
-
-      // Check match capacity
-      const totalSpots = match.planned_teams * match.max_players_per_team
-      const currentPlayers = match.match_players?.length || 0
+      await deleteFromWaitingListAction(matchId, teamPlayerId)
       
-      if (currentPlayers >= totalSpots) {
-        // Match is full, add to waiting list
-        const { error } = await supabase
-          .from('match_waiting_list')
-          .insert({
-            match_id: matchId,
-            team_player_id: guestId
-          })
-
-        if (error) throw error
-
-        const selectedMember = availableMembers.find(m => m.id === guestId)
-        fetchMatchDetails()
-        alert(`Match is full! ${selectedMember?.name} has been added to the waiting list.`)
-      } else {
-        // Space available, add to match
-        const { error } = await supabase
-          .from('match_players')
-          .insert({
-            match_id: matchId,
-            team_player_id: guestId,
-            team_id: null,
-            guest_name: null
-          })
-
-        if (error) throw error
-
-        const selectedMember = availableMembers.find(m => m.id === guestId)
-        fetchMatchDetails()
-        alert(`${selectedMember?.name} added to match successfully!`)
-      }
+      fetchMatchDetails()
+      toast.success('Player removed from waiting list successfully!')
     } catch (error: any) {
-      console.error('Error adding guest:', error)
-      alert('Error adding guest: ' + error.message)
-    } finally {
-      setAddingGuest(null)
+      console.error('Error removing player from waiting list:', error)
+      toast.error('Error removing player: ' + error.message)
     }
   }
 
-  const addGuest = async () => {
-    if (!selectedGuestMember) {
-      alert('Please select a group member to add as guest')
-      return
-    }
-
+  const addMemberToMatch = async (memberId: string) => {
+    // Prevent spam clicking
+    if (addingGuest !== null) return
+    
+    setAddingGuest(memberId) // Set loading state
     try {
-      // Add selected group member to match players directly
-      const { error: matchError } = await supabase
-        .from('match_players')
-        .insert({
-          match_id: matchId,
-          team_player_id: selectedGuestMember
+      const member = availableMembers.find(m => m.id === memberId)
+      if (!member || !match) return
+
+      // Calculate total spots and current players
+      const totalSpots = (match.plannedTeams || 2) * (match.maxPlayersPerTeam || 11)
+      const currentPlayers = match.matchPlayers?.length || 0
+
+      if (match.teamsFinalized) {
+        toast.warning('This match is finalized. No more players can be added.')
+        return
+      }
+
+      if (!match.teamsCreated && currentPlayers >= totalSpots) {
+        // Add to waiting list if match is full
+        await addToWaitingListAction({
+          matchId,
+          teamPlayerId: member.teamPlayerId || ''
         })
+        toast.info(`Match is full! ${member.name} has been added to the waiting list.`)
+      } else {
+        // Add to the match player list
+        await addMatchPlayerAction({
+          matchId,
+          teamPlayerId: member.teamPlayerId || '',
+          teamId: null,
+          guestName: null,
+        })
+        toast.success(`${member.name} added to match successfully!`)
+      }
 
-      if (matchError) throw matchError
-
-      const selectedMember = availableMembers.find(m => m.id === selectedGuestMember)
-      
-      setSelectedGuestMember('')
-      setShowAddGuest(false)
       fetchMatchDetails()
-      alert(`${selectedMember?.name} added to match successfully!`)
     } catch (error: any) {
-      console.error('Error adding guest:', error)
-      alert('Error adding guest: ' + error.message)
+      console.error('Error adding member:', error)
+      toast.error('Error adding member: ' + error.message)
+    } finally {
+      setAddingGuest(null) // Clear loading state
+    }
+  }
+
+  const assignPlayer = async (playerId: string, teamId: string) => {
+    try {
+      await assignPlayerToTeamAction(playerId, teamId)
+      fetchMatchDetails()
+    } catch (error: any) {
+      console.error('Error assigning player:', error)
+      toast.error('Error assigning player: ' + error.message)
     }
   }
 
   const createTeams = async () => {
-    if (!confirm('Create teams from current players? This will randomize players into teams.')) return
+    const confirmed = await confirm({
+      title: 'Create Teams',
+      message: 'Create teams from current players? This will randomize players into teams.',
+      confirmText: 'Create Teams',
+      variant: 'info',
+    })
+    
+    if (!confirmed) return
+    if (!match || !match.plannedTeams) return
 
     setCreatingTeams(true)
     try {
-      if (!match) throw new Error('Match not found')
-
-      // Get the total number of players
-      const totalPlayers = match.match_players?.length || 0
+      await createTeamsAction(matchId, match.plannedTeams)
       
-      if (totalPlayers === 0) {
-        alert('No players to create teams with!')
-        return
-      }
-
-      // Calculate optimal number of teams based on planned teams and current players
-      const minTeams = 2 // Always have at least 2 teams
-      const plannedTeams = match.planned_teams || 2
-      const optimalForPlayers = Math.ceil(totalPlayers / match.max_players_per_team)
-      
-      // Use planned teams if reasonable, otherwise optimize for current players
-      const numberOfTeams = totalPlayers <= plannedTeams * match.max_players_per_team ? 
-        Math.max(minTeams, Math.min(plannedTeams, Math.ceil(totalPlayers / 3))) :
-        Math.max(minTeams, optimalForPlayers)
-
-      console.log('Creating teams:', { totalPlayers, maxPlayersPerTeam: match.max_players_per_team, numberOfTeams })
-
-      // Delete any existing teams for this match first (in case of re-creation)
-      await supabase
-        .from('teams')
-        .delete()
-        .eq('match_id', matchId)
-
-      // Create the calculated number of teams
-      const teams = []
-      for (let i = 1; i <= numberOfTeams; i++) {
-        teams.push({
-          match_id: matchId,
-          name: `Team ${String.fromCharCode(64 + i)}` // Team A, Team B, etc.
-        })
-      }
-
-      const { data: createdTeams, error: teamsError } = await supabase
-        .from('teams')
-        .insert(teams)
-        .select()
-
-      if (teamsError) throw teamsError
-
-      // Clear any existing team assignments
-      await supabase
-        .from('match_players')
-        .update({ team_id: null })
-        .eq('match_id', matchId)
-
-      // Randomize and distribute players evenly across teams
-      const shuffledPlayers = [...(match.match_players || [])].sort(() => Math.random() - 0.5)
-      
-      // Distribute players in round-robin fashion for even distribution
-      for (let i = 0; i < shuffledPlayers.length; i++) {
-        const teamIndex = i % numberOfTeams
-        const teamId = createdTeams[teamIndex].id
-
-        const { error: updateError } = await supabase
-          .from('match_players')
-          .update({ team_id: teamId })
-          .eq('id', shuffledPlayers[i].id)
-
-        if (updateError) {
-          console.error('Error assigning player to team:', updateError)
-          throw updateError
-        }
-      }
-
-      // Mark teams as created
-      await supabase
-        .from('matches')
-        .update({ teams_created: true })
-        .eq('id', matchId)
-
       fetchMatchDetails()
-      alert(`Teams created successfully! ${numberOfTeams} teams with players distributed evenly.`)
+      toast.success(`Teams created successfully!`)
     } catch (error: any) {
       console.error('Error creating teams:', error)
-      alert('Error creating teams: ' + error.message)
+      toast.error('Error creating teams: ' + error.message)
     } finally {
       setCreatingTeams(false)
     }
   }
 
   const randomizeTeams = async () => {
-    if (!confirm('Randomize teams again? This will shuffle all players into new teams.')) return
+    const confirmed = await confirm({
+      title: 'Randomize Teams',
+      message: 'Randomize teams again? This will shuffle all players into new teams.',
+      confirmText: 'Randomize',
+      variant: 'warning',
+    })
+    
+    if (!confirmed) return
 
     setRandomizingTeams(true)
     try {
-      if (!match) throw new Error('Match not found')
-
-      // Get all current players
-      const allPlayers = match.match_players || []
-      if (allPlayers.length === 0) {
-        alert('No players to randomize!')
-        return
-      }
-
-      // Shuffle players array
-      const shuffledPlayers = [...allPlayers].sort(() => Math.random() - 0.5)
-      
-      // Get existing teams
-      const teams = match.teams || []
-      if (teams.length === 0) {
-        alert('No teams exist to randomize into!')
-        return
-      }
-
-      // Update each player's team assignment individually
-      for (let i = 0; i < shuffledPlayers.length; i++) {
-        const player = shuffledPlayers[i]
-        const assignedTeam = teams[i % teams.length]
-        
-        const { error } = await supabase
-          .from('match_players')
-          .update({ team_id: assignedTeam.id })
-          .eq('id', player.id)
-          
-        if (error) throw error
-      }
-
+      await randomizeTeamsAction(matchId)
       fetchMatchDetails()
-      alert('Teams randomized successfully!')
+      toast.success('Teams randomized successfully!')
     } catch (error: any) {
       console.error('Error randomizing teams:', error)
-      alert('Error randomizing teams: ' + error.message)
+      toast.error('Error randomizing teams: ' + error.message)
     } finally {
       setRandomizingTeams(false)
     }
   }
 
   const deleteMatch = async () => {
-    if (!confirm('Delete this match permanently? This action cannot be undone.')) return
-    if (!confirm('Are you absolutely sure? All match data will be lost.')) return
+    const confirmed = await confirm({
+      title: 'Delete Match',
+      message: 'Delete this match permanently? This action cannot be undone. All match data will be lost.',
+      confirmText: 'Delete Permanently',
+      variant: 'danger',
+    })
+    
+    if (!confirmed) return
 
     setDeletingMatch(true)
     try {
-      const { error } = await supabase
-        .from('matches')
-        .delete()
-        .eq('id', matchId)
-
-      if (error) throw error
-
-      alert('Match deleted successfully!')
-      onClose() // Close the modal and return to matches list
+      await deleteMatchAction(matchId)
+      toast.success('Match deleted successfully!')
+      onClose()
     } catch (error: any) {
       console.error('Error deleting match:', error)
-      alert('Error deleting match: ' + error.message)
+      toast.error('Error deleting match: ' + error.message)
     } finally {
       setDeletingMatch(false)
     }
   }
 
   const finalizeTeams = async () => {
-    if (!confirm('Finalize teams? After this, no players can join or leave the match.')) return
+    const confirmed = await confirm({
+      title: 'Finalize Teams',
+      message: 'Finalize teams? After this, no players can join or leave the match.',
+      confirmText: 'Finalize',
+      variant: 'warning',
+    })
+    
+    if (!confirmed) return
 
     setFinalizingTeams(true)
     try {
-      await supabase
-        .from('matches')
-        .update({ teams_finalized: true })
-        .eq('id', matchId)
-
+      await finalizeTeamsAction(matchId)
       fetchMatchDetails()
-      alert('Teams finalized! Match is now closed to changes.')
+      toast.success('Teams finalized! Match is now closed to changes.')
     } catch (error: any) {
       console.error('Error finalizing teams:', error)
-      alert('Error finalizing teams: ' + error.message)
+      toast.error('Error finalizing teams: ' + error.message)
     } finally {
       setFinalizingTeams(false)
     }
@@ -775,18 +540,18 @@ export default function MatchDetails({ matchId, onClose, isAdmin, currentUserId,
     )
   }
 
-  const matchDate = new Date(match.date_time)
+  const matchDate = new Date(match.dateTime || '')
   const isUpcoming = matchDate > new Date()
   const isToday = matchDate.toDateString() === new Date().toDateString()
 
   // Check if current user is already in the match
-  const currentUserInMatch = match?.match_players?.some(player => 
-    player.team_players?.users.id === currentUserId
+  const currentUserInMatch = match?.matchPlayers?.some((player: MatchPlayer) => 
+    player.teamPlayers?.users.id === currentUserId
   ) || false
 
   // Check if current user is on waiting list
   const currentUserOnWaitingList = waitingList.some(player => 
-    player.team_players.users.id === currentUserId
+    player.teamPlayers.users.id === currentUserId
   )
 
   return (
@@ -857,15 +622,15 @@ export default function MatchDetails({ matchId, onClose, isAdmin, currentUserId,
                 </div>
                 <div>
                   <span className="text-gray-500">Format</span>
-                  {match.teams_created ? (
+                  {match.teamsCreated ? (
                     <>
-                      <p className="font-medium">{match.teams.length} teams, {match.max_players_per_team} players each</p>
-                      <p className="text-gray-600">{match.teams.length * match.max_players_per_team} total spots</p>
+                      <p className="font-medium">{match.teams.length} teams, {match.maxPlayersPerTeam ?? 0} players each</p>
+                      <p className="text-gray-600">{match.teams.length * (match.maxPlayersPerTeam ?? 0)} total spots</p>
                     </>
                   ) : (
                     <>
-                      <p className="font-medium">{match.planned_teams} teams planned, {match.max_players_per_team} players each</p>
-                      <p className="text-gray-600">{match.planned_teams * match.max_players_per_team} total spots available</p>
+                      <p className="font-medium">{match.plannedTeams ?? 0} teams planned, {match.maxPlayersPerTeam ?? 0} players each</p>
+                      <p className="text-gray-600">{(match.plannedTeams ?? 0) * (match.maxPlayersPerTeam ?? 0)} total spots available</p>
                     </>
                   )}
                 </div>
@@ -873,7 +638,7 @@ export default function MatchDetails({ matchId, onClose, isAdmin, currentUserId,
             </div>
 
             {/* Join/Leave Actions */}
-            {isUpcoming && !match.teams_finalized && (
+            {isUpcoming && !match.teamsFinalized && (
               <div className="mb-6">
                 {!currentUserInMatch && !currentUserOnWaitingList ? (
                   <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
@@ -881,13 +646,13 @@ export default function MatchDetails({ matchId, onClose, isAdmin, currentUserId,
                     <div className="flex items-center gap-3">
                       <button
                         onClick={joinMatch}
-                        disabled={joining || match.teams_created}
+                        disabled={joining || (match.teamsCreated ?? false)}
                         className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-400 transition-colors"
                       >
-                        {joining ? 'Joining...' : match.teams_created ? 'Teams Created' : 'Join Match'}
+                        {joining ? 'Joining...' : match.teamsCreated ? 'Teams Created' : 'Join Match'}
                       </button>
                       <p className="text-sm text-blue-700">
-                        {match.teams_created ? 
+                        {match.teamsCreated ? 
                           'Teams have been created. New players cannot join.' :
                           'You\'ll be added to the player list and assigned to a team when teams are created'
                         }
@@ -900,15 +665,15 @@ export default function MatchDetails({ matchId, onClose, isAdmin, currentUserId,
                       <div>
                         <h4 className="font-medium text-green-900">You&apos;re in this match!</h4>
                         <p className="text-green-700 text-sm">
-                          {match.teams_created ? 'Check your team assignment below.' : 'You\'ll be assigned to a team when teams are created.'}
+                          {match.teamsCreated ? 'Check your team assignment below.' : 'You\'ll be assigned to a team when teams are created.'}
                         </p>
-                        {match.teams_created && (
+                        {match.teamsCreated && (
                           <p className="text-orange-600 text-xs mt-1">
                             ⚠️ Teams have been created. You can no longer leave this match.
                           </p>
                         )}
                       </div>
-                      {!match.teams_created && (
+                      {!match.teamsCreated && (
                         <button
                           onClick={leaveMatch}
                           className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors"
@@ -920,19 +685,29 @@ export default function MatchDetails({ matchId, onClose, isAdmin, currentUserId,
                   </div>
                 ) : (
                   <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-                    <h4 className="font-medium text-yellow-900">You&apos;re on the waiting list</h4>
-                    <p className="text-yellow-700 text-sm">You&apos;ll be notified if a spot opens up.</p>
-                    {match.teams_created && (
-                      <p className="text-orange-600 text-xs mt-1">
-                        ⚠️ Teams have been created. Waiting list is now closed.
-                      </p>
-                    )}
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h4 className="font-medium text-yellow-900">You&apos;re on the waiting list</h4>
+                        <p className="text-yellow-700 text-sm">You&apos;ll be notified if a spot opens up.</p>
+                        {match.teamsCreated && (
+                          <p className="text-orange-600 text-xs mt-1">
+                            ⚠️ Teams have been created. Waiting list is now closed.
+                          </p>
+                        )}
+                      </div>
+                      <button
+                        onClick={leaveMatch}
+                        className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors"
+                      >
+                        Leave Waiting List
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>
             )}
 
-            {match.teams_finalized && (
+            {match.teamsFinalized && (
               <div className="mb-6 bg-gray-50 border border-gray-200 rounded-lg p-4">
                 <h4 className="font-medium text-gray-900">Match Finalized</h4>
                 <p className="text-gray-700 text-sm">Teams are set and the match is closed to changes.</p>
@@ -944,16 +719,17 @@ export default function MatchDetails({ matchId, onClose, isAdmin, currentUserId,
               <div className="mb-6 bg-white border rounded-lg p-4">
                 <h4 className="font-medium text-gray-900 mb-3">Admin Controls</h4>
                 <div className="flex flex-wrap gap-2">
-                  {!match.teams_created && !match.teams_finalized && !creatingTeams && (
+                  {!match.teamsCreated && !match.teamsFinalized && !creatingTeams && (
                     <button
                       onClick={() => setShowGuestModal(true)}
-                      className="px-3 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors text-sm"
+                      disabled={addingGuest !== null}
+                      className="px-3 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors text-sm"
                     >
                       Add Group Member
                     </button>
                   )}
                   
-                  {!match.teams_created && !match.teams_finalized && (match.match_players?.length || 0) > 0 && (
+                  {!match.teamsCreated && !match.teamsFinalized && (match.matchPlayers?.length || 0) > 0 && (
                     <button
                       onClick={createTeams}
                       disabled={creatingTeams}
@@ -963,7 +739,7 @@ export default function MatchDetails({ matchId, onClose, isAdmin, currentUserId,
                     </button>
                   )}
                   
-                  {match.teams_created && !match.teams_finalized && (
+                  {match.teamsCreated && !match.teamsFinalized && (
                     <>
                       <button
                         onClick={randomizeTeams}
@@ -994,13 +770,22 @@ export default function MatchDetails({ matchId, onClose, isAdmin, currentUserId,
 
                 {/* Guest Management Modal */}
                 {showGuestModal && (
-                  <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                  <div 
+                    className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+                    onClick={(e) => {
+                      // Prevent closing if adding a guest or if clicking on the modal itself
+                      if (addingGuest === null && e.target === e.currentTarget) {
+                        setShowGuestModal(false)
+                      }
+                    }}
+                  >
                     <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[80vh] overflow-hidden">
                       <div className="flex items-center justify-between p-4 border-b">
                         <h3 className="text-lg font-semibold">Add Group Members to Match</h3>
                         <button
                           onClick={() => setShowGuestModal(false)}
-                          className="text-gray-400 hover:text-gray-600"
+                          disabled={addingGuest !== null}
+                          className="text-gray-400 hover:text-gray-600 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                           <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -1009,7 +794,7 @@ export default function MatchDetails({ matchId, onClose, isAdmin, currentUserId,
                       </div>
                       
                       <div className="p-4">
-                        {availableMembers.length === 0 ? (
+                        {filterAvailableMembers().length === 0 ? (
                           <div className="text-center py-8">
                             <p className="text-gray-500">All group members are already participating in this match.</p>
                           </div>
@@ -1024,7 +809,9 @@ export default function MatchDetails({ matchId, onClose, isAdmin, currentUserId,
                             </div>
                             
                             <div className="space-y-3 max-h-96 overflow-y-auto">
-                              {availableMembers.map(member => (
+                              {filterAvailableMembers()
+                                .sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()))
+                                .map(member => (
                                 <div key={member.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                                   <div className="flex items-center gap-3">
                                     <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
@@ -1038,9 +825,9 @@ export default function MatchDetails({ matchId, onClose, isAdmin, currentUserId,
                                     </div>
                                   </div>
                                   <button
-                                    onClick={() => addGuestFromModal(member.id)}
-                                    disabled={addingGuest === member.id}
-                                    className="px-3 py-1 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-400 text-sm"
+                                    onClick={() => addMemberToMatch(member.id)}
+                                    disabled={addingGuest !== null}
+                                    className="px-3 py-1 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed hover:disabled:bg-gray-400 transition-colors text-sm"
                                   >
                                     {addingGuest === member.id ? 'Adding...' : 'Add'}
                                   </button>
@@ -1058,19 +845,19 @@ export default function MatchDetails({ matchId, onClose, isAdmin, currentUserId,
 
             {/* Player List or Teams */}
             <div className="space-y-6">
-              {!match.teams_created ? (
+              {!match.teamsCreated ? (
                 /* Show Player List */
                 <div>
                   <h3 className="text-lg font-semibold mb-4">Registered Players</h3>
-                  {(match.match_players?.length || 0) === 0 ? (
+                  {(match.matchPlayers?.length || 0) === 0 ? (
                     <div className="bg-gray-50 rounded-lg p-6 text-center">
                       <p className="text-gray-500">No players registered yet.</p>
                     </div>
-                  ) : isAdmin || match.created_by === currentUserId ? (
+                  ) : isAdmin || match.createdBy === currentUserId ? (
                     <div className="bg-white border rounded-lg p-4">
                       <div className="flex items-center justify-between mb-4">
                         <span className="text-sm text-gray-600">
-                          {match.match_players?.length || 0}/{match.planned_teams * match.max_players_per_team} players registered
+                          {match.matchPlayers?.length || 0}/{(match.plannedTeams ?? 0) * (match.maxPlayersPerTeam ?? 0)} players registered
                         </span>
                         <span className="text-xs text-gray-500">
                           Teams will be created from this list
@@ -1078,26 +865,32 @@ export default function MatchDetails({ matchId, onClose, isAdmin, currentUserId,
                       </div>
                       
                       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                        {match.match_players?.map(player => (
+                        {[...match.matchPlayers]
+                          .sort((a, b) => {
+                            const nameA = (a.guestName || a.teamPlayers?.users.name || '').toLowerCase()
+                            const nameB = (b.guestName || b.teamPlayers?.users.name || '').toLowerCase()
+                            return nameA.localeCompare(nameB)
+                          })
+                          .map(player => (
                           <div key={player.id} className="flex items-center gap-2 p-3 bg-gray-50 rounded-lg">
                             <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
                               <span className="text-sm font-medium text-blue-800">
-                                {player.guest_name ? 
-                                  player.guest_name.charAt(0).toUpperCase() :
-                                  player.team_players?.users.name.charAt(0).toUpperCase()
+                                {player.guestName ? 
+                                  player.guestName.charAt(0).toUpperCase() :
+                                  (player.teamPlayers?.users.name?.charAt(0).toUpperCase() || 'P')
                                 }
                               </span>
                             </div>
                             <div className="flex-1 min-w-0">
                               <p className="font-medium text-sm truncate">
-                                {player.guest_name || player.team_players?.users.name}
+                                {player.guestName || player.teamPlayers?.users.name}
                               </p>
-                              {player.team_players && (
+                              {player.teamPlayers && (
                                 <div className="flex items-center gap-2 text-xs text-gray-500">
-                                  <span>{player.team_players.preferred_position}</span>
+                                  <span>{player.teamPlayers.preferredPosition}</span>
                                   <span>•</span>
-                                  <span>{player.team_players.rating}/10</span>
-                                  {player.team_players.is_key_player && (
+                                  <span>{player.teamPlayers.rating}/10</span>
+                                  {player.teamPlayers.isKeyPlayer && (
                                     <>
                                       <span>•</span>
                                       <span className="text-yellow-600">⭐</span>
@@ -1105,13 +898,13 @@ export default function MatchDetails({ matchId, onClose, isAdmin, currentUserId,
                                   )}
                                 </div>
                               )}
-                              {player.guest_name && (
+                              {player.guestName && (
                                 <span className="text-xs text-orange-600">Guest Player</span>
                               )}
                             </div>
-                            {(isAdmin || match.created_by === currentUserId) && (
+                            {(isAdmin || match.createdBy === currentUserId) && (
                               <button
-                                onClick={() => removePlayer(player.id, player.guest_name || player.team_players?.users.name || 'Player')}
+                                onClick={() => removePlayer(player.id, player.guestName || player.teamPlayers?.users.name || 'Player')}
                                 className="px-2 py-1 bg-red-500 text-white rounded-md hover:bg-red-600 text-xs"
                                 title="Remove player"
                               >
@@ -1126,7 +919,7 @@ export default function MatchDetails({ matchId, onClose, isAdmin, currentUserId,
                     <div className="bg-white border rounded-lg p-4">
                       <div className="flex items-center justify-between mb-4">
                         <span className="text-sm text-gray-600">
-                          {match.match_players?.length || 0} players registered
+                          {match.matchPlayers?.length || 0} players registered
                         </span>
                         <span className="text-xs text-gray-500">
                           Teams will be created from this list
@@ -1134,27 +927,33 @@ export default function MatchDetails({ matchId, onClose, isAdmin, currentUserId,
                       </div>
                       
                       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                        {match.match_players?.map(player => (
+                        {[...match.matchPlayers]
+                          .sort((a, b) => {
+                            const nameA = (a.guestName || a.teamPlayers?.users.name || '').toLowerCase()
+                            const nameB = (b.guestName || b.teamPlayers?.users.name || '').toLowerCase()
+                            return nameA.localeCompare(nameB)
+                          })
+                          .map(player => (
                           <div key={player.id} className="flex items-center gap-2 p-3 bg-gray-50 rounded-lg">
                             <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
                               <span className="text-sm font-medium text-blue-800">
-                                {player.guest_name ? 
-                                  player.guest_name.charAt(0).toUpperCase() :
-                                  player.team_players?.users.name.charAt(0).toUpperCase()
+                                {player.guestName ? 
+                                  player.guestName.charAt(0).toUpperCase() :
+                                  (player.teamPlayers?.users.name?.charAt(0).toUpperCase() || 'P')
                                 }
                               </span>
                             </div>
                             <div className="flex-1 min-w-0">
                               <p className="font-medium text-sm truncate">
-                                {player.guest_name || player.team_players?.users.name}
+                                {player.guestName || player.teamPlayers?.users.name}
                               </p>
-                              {player.guest_name && (
+                              {player.guestName && (
                                 <span className="text-xs text-orange-600">Guest Player</span>
                               )}
                             </div>
-                            {(isAdmin || match.created_by === currentUserId) && (
+                            {(isAdmin || match.createdBy === currentUserId) && (
                               <button
-                                onClick={() => removePlayer(player.id, player.guest_name || player.team_players?.users.name || 'Player')}
+                                onClick={() => removePlayer(player.id, player.guestName || player.teamPlayers?.users.name || 'Player')}
                                 className="px-2 py-1 bg-red-500 text-white rounded-md hover:bg-red-600 text-xs"
                                 title="Remove player"
                               >
@@ -1171,38 +970,38 @@ export default function MatchDetails({ matchId, onClose, isAdmin, currentUserId,
                 /* Show Teams */
                 <div>
                   <h3 className="text-lg font-semibold mb-4">Teams</h3>
-                  {isAdmin || match.created_by === currentUserId ? (
+                  {isAdmin || match.createdBy === currentUserId ? (
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                       {match.teams.map(team => (
                         <div key={team.id} className="bg-white border rounded-lg p-4">
                           <div className="flex items-center justify-between mb-3">
                             <h4 className="font-medium text-gray-900">{team.name}</h4>
                             <span className="text-sm text-gray-500">
-                              {team.match_players.length} players
+                              {team.matchPlayers.length} players
                             </span>
                           </div>
                           
                           <div className="space-y-2">
-                            {team.match_players.map(player => (
+                            {team.matchPlayers.map(player => (
                               <div key={player.id} className="flex items-center gap-2 text-sm">
                                 <div className="w-6 h-6 bg-blue-100 rounded-full flex items-center justify-center">
                                   <span className="text-xs font-medium text-blue-800">
-                                    {player.guest_name ? 
-                                      player.guest_name.charAt(0).toUpperCase() :
-                                      player.team_players?.users.name.charAt(0).toUpperCase()
+                                    {player.guestName ? 
+                                      player.guestName.charAt(0).toUpperCase() :
+                                      (player.teamPlayers?.users.name?.charAt(0).toUpperCase() || 'P')
                                     }
                                   </span>
                                 </div>
                                 <div className="flex-1">
                                   <p className="font-medium">
-                                    {player.guest_name || player.team_players?.users.name}
+                                    {player.guestName || player.teamPlayers?.users.name}
                                   </p>
-                                  {player.team_players && (
+                                  {player.teamPlayers && (
                                     <div className="flex items-center gap-2 text-xs text-gray-500">
-                                      <span>{player.team_players.preferred_position}</span>
+                                      <span>{player.teamPlayers.preferredPosition}</span>
                                       <span>•</span>
-                                      <span>Rating: {player.team_players.rating}/10</span>
-                                      {player.team_players.is_key_player && (
+                                      <span>Rating: {player.teamPlayers.rating}/10</span>
+                                      {player.teamPlayers.isKeyPlayer && (
                                         <>
                                           <span>•</span>
                                           <span className="text-yellow-600">⭐ Key</span>
@@ -1210,7 +1009,7 @@ export default function MatchDetails({ matchId, onClose, isAdmin, currentUserId,
                                       )}
                                     </div>
                                   )}
-                                  {player.guest_name && (
+                                  {player.guestName && (
                                     <span className="text-xs text-orange-600">Guest</span>
                                   )}
                                 </div>
@@ -1220,33 +1019,33 @@ export default function MatchDetails({ matchId, onClose, isAdmin, currentUserId,
                         </div>
                       ))}
                     </div>
-                  ) : match.teams_finalized ? (
+                  ) : match.teamsFinalized ? (
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                       {match.teams.map(team => (
                         <div key={team.id} className="bg-white border rounded-lg p-4">
                           <div className="flex items-center justify-between mb-3">
                             <h4 className="font-medium text-gray-900">{team.name}</h4>
                             <span className="text-sm text-gray-500">
-                              {team.match_players.length} players
+                              {team.matchPlayers.length} players
                             </span>
                           </div>
                           
                           <div className="space-y-2">
-                            {team.match_players.map(player => (
+                            {team.matchPlayers.map(player => (
                               <div key={player.id} className="flex items-center gap-2 text-sm">
                                 <div className="w-6 h-6 bg-blue-100 rounded-full flex items-center justify-center">
                                   <span className="text-xs font-medium text-blue-800">
-                                    {player.guest_name ? 
-                                      player.guest_name.charAt(0).toUpperCase() :
-                                      player.team_players?.users.name.charAt(0).toUpperCase()
+                                    {player.guestName ? 
+                                      player.guestName.charAt(0).toUpperCase() :
+                                      (player.teamPlayers?.users.name?.charAt(0).toUpperCase() || 'P')
                                     }
                                   </span>
                                 </div>
                                 <div className="flex-1">
                                   <p className="font-medium">
-                                    {player.guest_name || player.team_players?.users.name}
+                                    {player.guestName || player.teamPlayers?.users.name}
                                   </p>
-                                  {player.guest_name && (
+                                  {player.guestName && (
                                     <span className="text-xs text-orange-600">Guest</span>
                                   )}
                                 </div>
@@ -1274,7 +1073,7 @@ export default function MatchDetails({ matchId, onClose, isAdmin, currentUserId,
                       </div>
                       <div className="bg-white rounded-lg p-4">
                         <p className="text-sm text-gray-600 mb-2">
-                          <strong>{match.teams?.length || 0} teams</strong> have been created from <strong>{match.match_players?.length || 0} players</strong>
+                          <strong>{match.teams?.length || 0} teams</strong> have been created from <strong>{match.matchPlayers?.length || 0} players</strong>
                         </p>
                         <div className="text-xs text-gray-500">
                           You&apos;ll be notified when team assignments are finalized.
@@ -1291,23 +1090,29 @@ export default function MatchDetails({ matchId, onClose, isAdmin, currentUserId,
               <div className="mt-6">
                 <h3 className="text-lg font-semibold mb-4">Waiting List</h3>
                 <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-                  {isAdmin || match.created_by === currentUserId ? (
+                  {isAdmin || match.createdBy === currentUserId ? (
                     <div className="space-y-2">
-                      {waitingList.map((player, index) => (
+                      {[...waitingList]
+                        .sort((a, b) => {
+                          const dateA = a.joinedAt ? new Date(a.joinedAt).getTime() : 0
+                          const dateB = b.joinedAt ? new Date(b.joinedAt).getTime() : 0
+                          return dateA - dateB
+                        })
+                        .map((player, index) => (
                         <div key={player.id} className="flex items-center gap-3 text-sm">
                           <span className="text-yellow-700 font-medium">#{index + 1}</span>
                           <div className="w-6 h-6 bg-yellow-100 rounded-full flex items-center justify-center">
                             <span className="text-xs font-medium text-yellow-800">
-                              {player.team_players.users.name.charAt(0).toUpperCase()}
+                              {player.teamPlayers.users.name?.charAt(0).toUpperCase() || 'P'}
                             </span>
                           </div>
-                          <div>
-                            <p className="font-medium">{player.team_players.users.name}</p>
+                          <div className="flex-1">
+                            <p className="font-medium">{player.teamPlayers.users.name}</p>
                             <div className="flex items-center gap-2 text-xs text-gray-500">
-                              <span>{player.team_players.preferred_position}</span>
+                              <span>{player.teamPlayers.preferredPosition}</span>
                               <span>•</span>
-                              <span>Rating: {player.team_players.rating}/10</span>
-                              {player.team_players.is_key_player && (
+                              <span>Rating: {player.teamPlayers.rating}/10</span>
+                              {player.teamPlayers.isKeyPlayer && (
                                 <>
                                   <span>•</span>
                                   <span className="text-yellow-600">⭐ Key</span>
@@ -1315,21 +1120,36 @@ export default function MatchDetails({ matchId, onClose, isAdmin, currentUserId,
                               )}
                             </div>
                           </div>
+                          {!match.teamsFinalized && (
+                            <button
+                              onClick={() => removeFromWaitingList(player.teamPlayerId || '', player.teamPlayers.users.name || 'Player')}
+                              className="px-2 py-1 bg-red-500 text-white rounded-md hover:bg-red-600 text-xs"
+                              title="Remove from waiting list"
+                            >
+                              ×
+                            </button>
+                          )}
                         </div>
                       ))}
                     </div>
                   ) : (
                     <div className="space-y-2">
-                      {waitingList.map((player, index) => (
+                      {[...waitingList]
+                        .sort((a, b) => {
+                          const dateA = a.joinedAt ? new Date(a.joinedAt).getTime() : 0
+                          const dateB = b.joinedAt ? new Date(b.joinedAt).getTime() : 0
+                          return dateA - dateB
+                        })
+                        .map((player, index) => (
                         <div key={player.id} className="flex items-center gap-3 text-sm">
                           <span className="text-yellow-700 font-medium">#{index + 1}</span>
                           <div className="w-6 h-6 bg-yellow-100 rounded-full flex items-center justify-center">
                             <span className="text-xs font-medium text-yellow-800">
-                              {player.team_players.users.name.charAt(0).toUpperCase()}
+                              {player.teamPlayers.users.name?.charAt(0).toUpperCase() || 'P'}
                             </span>
                           </div>
                           <div className="flex-1">
-                            <p className="font-medium">{player.team_players.users.name}</p>
+                            <p className="font-medium">{player.teamPlayers.users.name}</p>
                           </div>
                         </div>
                       ))}

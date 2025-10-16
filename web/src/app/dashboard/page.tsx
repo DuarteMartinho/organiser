@@ -1,34 +1,35 @@
-import { createClient } from '@/lib/supabase/server'
+import { requireAuth } from '@/lib/auth/server'
 import AuthButtonClient from '@/components/auth/auth-button-client'
 import Dashboard from '@/components/dashboard'
-import { redirect } from 'next/navigation'
+import Link from 'next/link'
+import { Trophy, Users } from 'lucide-react'
 
 export default async function DashboardPage() {
-  const supabase = await createClient()
-  
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-
-  if (!user) {
-    return redirect('/')
-  }
+  const session = await requireAuth()
+  const user = session.user
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <header className="bg-white shadow">
-        <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-green-50">
+      {/* Modern Header */}
+      <header className="border-b bg-white/80 backdrop-blur-sm sticky top-0 z-50 shadow-sm">
+        <div className="mx-auto max-w-7xl px-4 py-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between">
-            <h1 className="text-3xl font-bold tracking-tight text-gray-900">
-              Football Dashboard
-            </h1>
             <div className="flex items-center gap-4">
-              <a 
+              <Link href="/" className="flex items-center gap-2 group">
+                <Trophy className="h-8 w-8 text-blue-600 group-hover:scale-110 transition-transform" />
+                <span className="text-xl font-bold bg-gradient-to-r from-blue-600 to-green-600 bg-clip-text text-transparent">
+                  Football Organiser
+                </span>
+              </Link>
+            </div>
+            <div className="flex items-center gap-4">
+              <Link 
                 href="/groups" 
-                className="text-blue-600 hover:text-blue-800 font-medium"
+                className="flex items-center gap-2 px-4 py-2 text-blue-600 hover:text-blue-700 font-medium transition-colors rounded-lg hover:bg-blue-50"
               >
-                My Groups
-              </a>
+                <Users className="h-5 w-5" />
+                <span>My Groups</span>
+              </Link>
               <AuthButtonClient />
             </div>
           </div>
@@ -36,7 +37,7 @@ export default async function DashboardPage() {
       </header>
 
       <main>
-        <Dashboard currentUserId={user!.id} />
+        <Dashboard currentUserId={user.id} />
       </main>
     </div>
   )

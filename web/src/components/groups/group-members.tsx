@@ -1,18 +1,12 @@
 'use client'
 
-import { createClient } from '@/lib/supabase/client'
 import { useState, useEffect, useCallback } from 'react'
-import UserDetailsSidebar from './user-details-sidebar'
-import UserEditModal from './user-edit-modal'
+import { fetchGroupMembersAction } from '@/actions/group-members/fetch-group-members'
 
 interface Member {
-  group_id: string
-  user_id: string
-  joined_at: string
-  users: {
-    name: string
-    email: string
-  }
+  id: string
+  name: string
+  email: string
   isAdmin: boolean
 }
 
@@ -21,15 +15,14 @@ interface GroupMembersProps {
   isAdmin: boolean
   currentUserId: string
   groupOwnerId?: string
+  onSelectUser?: (userId: string) => void
 }
 
-export default function GroupMembers({ groupId, isAdmin, currentUserId, groupOwnerId }: GroupMembersProps) {
+export default function GroupMembers({ groupId, isAdmin, currentUserId, groupOwnerId, onSelectUser }: GroupMembersProps) {
   const [members, setMembers] = useState<Member[]>([])
   const [loading, setLoading] = useState(true)
-  const [selectedUserId, setSelectedUserId] = useState<string | null>(null)
   const [mounted, setMounted] = useState(false)
   const [searchTerm, setSearchTerm] = useState('')
-  const supabase = createClient()
 
   useEffect(() => {
     setMounted(true)
@@ -37,120 +30,16 @@ export default function GroupMembers({ groupId, isAdmin, currentUserId, groupOwn
 
   const fetchMembers = useCallback(async () => {
     try {
-      console.log('Fetching members for group:', groupId)
-      
-      // Check if groupId is valid
-      if (!groupId) {
-        throw new Error('Group ID is required')
-      }
-
-      // First, let's test basic connectivity
-      const { data: testData, error: testError } = await supabase
-        .from('group_members')
-        .select('user_id')
-        .eq('group_id', groupId)
-        .limit(1)
-
-      console.log('Basic connectivity test:', { testData, testError })
-
-      if (testError) {
-        throw new Error(`Database connection failed: ${testError.message}`)
-      }
-
-      // Now try the full query step by step
-      // Step 1: Get basic member data without users join
-      const { data: basicMembers, error: basicError } = await supabase
-        .from('group_members')
-        .select('group_id, user_id, joined_at')
-        .eq('group_id', groupId)
-        .order('joined_at', { ascending: true })
-        .limit(50)
-
-      console.log('Basic members query:', { basicMembers, basicError })
-
-      if (basicError) {
-        throw new Error(`Failed to fetch basic members: ${basicError.message}`)
-      }
-
-      if (!basicMembers || basicMembers.length === 0) {
-        console.log('No members found for this group')
-        setMembers([])
-        return
-      }
-
-      // Step 2: Get user details for each member
-      const userIds = basicMembers.map((member: any) => member.user_id)
-      const { data: usersData, error: usersError } = await supabase
-        .from('users')
-        .select('id, name, email')
-        .in('id', userIds)
-
-      console.log('Users query:', { usersData, usersError })
-
-      if (usersError) {
-        throw new Error(`Failed to fetch user details: ${usersError.message}`)
-      }
-
-      // Step 3: Get admin list
-      const { data: adminData, error: adminError } = await supabase
-        .from('group_admins')
-        .select('user_id')
-        .eq('group_id', groupId)
-        .limit(20)
-
-      console.log('Admin query result:', { adminData, adminError })
-
-      // Don't fail if admin query fails, just warn
-      if (adminError) {
-        console.warn('Admin query error (non-fatal):', adminError)
-      }
-
-      const adminIds = adminData?.map((admin: any) => admin.user_id) || []
-
-      // Step 4: Combine all data
-      const usersMap = usersData?.reduce((acc: any, user: any) => {
-        acc[user.id] = user
-        return acc
-      }, {}) || {}
-
-      const membersWithDetails = basicMembers?.map((member: any) => {
-        const userDetails = usersMap[member.user_id]
-        if (!userDetails) {
-          console.warn(`User details not found for user_id: ${member.user_id}`)
-          return null
-        }
-        
-        return {
-          ...member,
-          users: {
-            name: userDetails.name || 'Unknown User',
-            email: userDetails.email || 'No email'
-          },
-          isAdmin: adminIds.includes(member.user_id)
-        }
-      }).filter(Boolean) || [] // Remove null entries
-
-      // Filter out guest users (those with temporary emails)
-      const nonGuestMembers = membersWithDetails.filter((member: any) => 
-        !member.users.email.includes('@temp.local')
-      )
-
-      console.log('Final members with details (excluding guests):', nonGuestMembers)
-      setMembers(nonGuestMembers)
+      setLoading(true)
+      const membersData = await fetchGroupMembersAction(groupId)
+      setMembers(membersData)
     } catch (error) {
       console.error('Error fetching members:', error)
-      console.error('Error details:', {
-        message: error instanceof Error ? error.message : 'Unknown error',
-        stack: error instanceof Error ? error.stack : 'No stack trace',
-        groupId,
-        errorType: typeof error,
-        errorString: String(error)
-      })
-      setMembers([]) // Set empty array on error
+      setMembers([])
     } finally {
       setLoading(false)
     }
-  }, [groupId, supabase])
+  }, [groupId])
 
   useEffect(() => {
     fetchMembers()
@@ -158,13 +47,13 @@ export default function GroupMembers({ groupId, isAdmin, currentUserId, groupOwn
 
   // Filter members based on search term
   const filteredMembers = members.filter(member => 
-    member.users.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    member.users.email.toLowerCase().includes(searchTerm.toLowerCase())
+    member.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    member.email.toLowerCase().includes(searchTerm.toLowerCase())
   )
 
   if (loading) {
     return (
-      <div className="bg-white rounded-lg border shadow-sm p-6">
+      <div>
         <h3 className="text-lg font-semibold mb-4">Members</h3>
         <p className="text-gray-500">Loading...</p>
       </div>
@@ -173,7 +62,7 @@ export default function GroupMembers({ groupId, isAdmin, currentUserId, groupOwn
 
   return (
     <>
-      <div className="bg-white rounded-lg border shadow-sm p-6">
+      <div>
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-semibold">Members</h3>
           <span className="text-sm text-gray-500">
@@ -203,14 +92,14 @@ export default function GroupMembers({ groupId, isAdmin, currentUserId, groupOwn
         <div className="space-y-3">
           {filteredMembers.map((member) => (
             <div 
-              key={`${member.group_id}-${member.user_id}`} 
-              onClick={() => setSelectedUserId(member.user_id)}
+              key={member.id}
+              onClick={() => onSelectUser?.(member.id)}
               className="flex items-center justify-between p-3 border rounded-md hover:bg-gray-50 cursor-pointer transition-colors"
             >
               <div className="flex-1">
                 <div className="flex items-center gap-2">
-                  <h4 className="font-medium text-gray-900">{member.users.name}</h4>
-                  {member.user_id === groupOwnerId ? (
+                  <h4 className="font-medium text-gray-900">{member.name}</h4>
+                  {member.id === groupOwnerId ? (
                     <span className="px-2 py-0.5 text-xs bg-purple-100 text-purple-800 rounded-full">
                       Owner
                     </span>
@@ -219,20 +108,13 @@ export default function GroupMembers({ groupId, isAdmin, currentUserId, groupOwn
                       Admin
                     </span>
                   ) : null}
-                  {member.user_id === currentUserId && (
+                  {member.id === currentUserId && (
                     <span className="px-2 py-0.5 text-xs bg-green-100 text-green-800 rounded-full">
                       You
                     </span>
                   )}
                 </div>
-                <p className="text-sm text-gray-600">{member.users.email}</p>
-                <p className="text-xs text-gray-500">
-                  Joined: {mounted ? new Date(member.joined_at).toLocaleDateString('en-US', {
-                    month: 'short',
-                    day: 'numeric',
-                    year: 'numeric'
-                  }) : 'Loading...'}
-                </p>
+                <p className="text-sm text-gray-600">{member.email}</p>
               </div>
 
               <div className="text-gray-400">
@@ -271,18 +153,6 @@ export default function GroupMembers({ groupId, isAdmin, currentUserId, groupOwn
           </div>
         )}
       </div>
-
-      {/* User Details Sidebar */}
-      <UserDetailsSidebar
-        isOpen={!!selectedUserId}
-        onClose={() => setSelectedUserId(null)}
-        userId={selectedUserId || ''}
-        groupId={groupId}
-        isCurrentUserAdmin={isAdmin}
-        groupOwnerId={groupOwnerId}
-        currentUserId={currentUserId}
-        onMemberUpdate={fetchMembers}
-      />
     </>
   )
 }

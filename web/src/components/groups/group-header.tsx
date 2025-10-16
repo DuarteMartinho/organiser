@@ -1,7 +1,7 @@
 'use client'
 
-import { createClient } from '@/lib/supabase/client'
 import { useState, useEffect, useCallback } from 'react'
+import { fetchGroupHeaderStatsAction } from '@/actions/groups/fetch-group-header-stats'
 
 interface GroupHeaderProps {
   group: {
@@ -34,8 +34,6 @@ export default function GroupHeader({ group, isAdmin, onGroupUpdated }: GroupHea
   const [loading, setLoading] = useState(true)
   const [mounted, setMounted] = useState(false)
 
-  const supabase = createClient()
-
   // Fix hydration issue by only showing dates after component mounts
   useEffect(() => {
     setMounted(true)
@@ -53,46 +51,8 @@ export default function GroupHeader({ group, isAdmin, onGroupUpdated }: GroupHea
 
   const fetchStats = useCallback(async () => {
     try {
-      // Get total members excluding guests
-      const { data: allMembers, error: memberError } = await supabase
-        .from('group_members')
-        .select(`
-          user_id,
-          users!inner (
-            email
-          )
-        `)
-        .eq('group_id', currentGroup.id)
-        .limit(100)
-
-      let memberCount = 0
-      if (!memberError && allMembers) {
-        // Filter out guests (users with @temp.local emails)
-        memberCount = allMembers.filter((member: any) => 
-          !member.users.email.includes('@temp.local')
-        ).length
-      }
-
-      // Get match count
-      const { count: totalMatches } = await supabase
-        .from('matches')
-        .select('*', { count: 'exact', head: true })
-        .eq('group_id', currentGroup.id)
-
-      // Simplified upcoming matches count  
-      const now = new Date()
-      const { count: upcomingMatches } = await supabase
-        .from('matches')
-        .select('*', { count: 'exact', head: true })
-        .eq('group_id', currentGroup.id)
-        .gt('date_time', now.toISOString()) // Use gt instead of gte, and full ISO string
-
-      setStats({
-        memberCount,
-        totalMatches: totalMatches || 0,
-        upcomingMatches: upcomingMatches || 0,
-        thisMonthMatches: 0
-      })
+      const stats = await fetchGroupHeaderStatsAction(currentGroup.id)
+      setStats(stats)
     } catch (error) {
       console.error('Error fetching stats:', error)
       setStats({
@@ -104,7 +64,7 @@ export default function GroupHeader({ group, isAdmin, onGroupUpdated }: GroupHea
     } finally {
       setLoading(false)
     }
-  }, [currentGroup.id, supabase])
+  }, [currentGroup.id])
 
   useEffect(() => {
     fetchStats()

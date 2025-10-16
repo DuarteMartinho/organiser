@@ -1,8 +1,9 @@
 'use client'
 
-import { createClient } from '@/lib/supabase/client'
+import { authClient } from '@/lib/auth-client'
 import { useEffect, useState, useCallback } from 'react'
 import InviteManager from './invite-manager'
+import { fetchUserGroupsWithAdminStatusAction } from '@/actions/groups/fetch-user-groups-with-admin-status';
 
 interface Group {
   id: string
@@ -22,58 +23,29 @@ export default function GroupsList({ onTabChange }: GroupsListProps) {
   const [groups, setGroups] = useState<Group[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedGroup, setSelectedGroup] = useState<string | null>(null)
-  const supabase = createClient()
 
   const fetchGroups = useCallback(async () => {
     try {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) return
+      const { data: session } = await authClient.getSession()
+      if (!session?.user) return
 
-      // Get groups where user is a member with admin status
-      const { data: memberGroups, error } = await supabase
-        .from('group_members')
-        .select(`
-          groups (
-            id,
-            name,
-            description,
-            privacy,
-            created_at
-          )
-        `)
-        .eq('user_id', user.id)
-
-      if (error) throw error
-
-      // Get admin status separately
-      const { data: adminGroups } = await supabase
-        .from('group_admins')
-        .select('group_id')
-        .eq('user_id', user.id)
-
-      const adminGroupIds = adminGroups?.map((item: any) => item.group_id) || []
-
-      // Simplified owner detection - just check if user is admin for now
-      // We'll implement proper owner detection later to avoid memory issues
-      const groupsData = memberGroups
-        ?.map((item: any) => {
-          if (!item.groups) return null
-          return {
-            ...item.groups,
-            isAdmin: adminGroupIds.includes(item.groups.id),
-            isOwner: false // Temporarily disable owner detection
-          }
-        })
-        .filter(Boolean) as Group[]
-
-      setGroups(groupsData || [])
+      // Fetch groups with admin status using server action
+      const groupsData = await fetchUserGroupsWithAdminStatusAction(session.user.id);
+      
+      // Map to match the Group interface
+      const mappedGroups = groupsData.map(group => ({
+        ...group,
+        created_at: group.created_at?.toISOString() || new Date().toISOString(),
+      }));
+      
+      setGroups(mappedGroups || [])
     } catch (error) {
       console.error('Error fetching groups:', error)
       setGroups([])
     } finally {
       setLoading(false)
     }
-  }, [supabase])
+  }, [])
 
   useEffect(() => {
     fetchGroups()

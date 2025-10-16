@@ -1,18 +1,15 @@
 'use client'
 
-import { createClient } from '@/lib/supabase/client'
 import { useState, useEffect, useCallback } from 'react'
+import { UserCircle } from 'lucide-react'
 import UserDetailsSidebar from './user-details-sidebar'
+import { fetchGuestsAction } from '@/actions/guests/fetch-guests'
 
 interface Guest {
-  group_id: string
-  user_id: string
-  joined_at: string
-  users: {
-    name: string
-    email: string
-  }
-  isAdmin: boolean
+  id: string
+  name: string
+  email: string
+  joinedAt: Date | null
 }
 
 interface GuestPlayersProps {
@@ -27,7 +24,6 @@ export default function GuestPlayers({ groupId, isAdmin, currentUserId, groupOwn
   const [loading, setLoading] = useState(true)
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null)
   const [mounted, setMounted] = useState(false)
-  const supabase = createClient()
 
   useEffect(() => {
     setMounted(true)
@@ -35,91 +31,15 @@ export default function GuestPlayers({ groupId, isAdmin, currentUserId, groupOwn
 
   const fetchGuests = useCallback(async () => {
     try {
-      console.log('Fetching guests for group:', groupId)
-      
-      if (!groupId) {
-        throw new Error('Group ID is required')
-      }
-
-      // Get basic member data
-      const { data: basicMembers, error: basicError } = await supabase
-        .from('group_members')
-        .select('group_id, user_id, joined_at')
-        .eq('group_id', groupId)
-        .order('joined_at', { ascending: true })
-        .limit(100)
-
-      if (basicError) {
-        throw new Error(`Failed to fetch basic members: ${basicError.message}`)
-      }
-
-      if (!basicMembers || basicMembers.length === 0) {
-        console.log('No members found for this group')
-        setGuests([])
-        return
-      }
-
-      // Get user details for each member
-  const userIds = basicMembers.map((member: any) => member.user_id)
-      const { data: usersData, error: usersError } = await supabase
-        .from('users')
-        .select('id, name, email')
-        .in('id', userIds)
-
-      if (usersError) {
-        throw new Error(`Failed to fetch user details: ${usersError.message}`)
-      }
-
-      // Get admin list
-      const { data: adminData, error: adminError } = await supabase
-        .from('group_admins')
-        .select('user_id')
-        .eq('group_id', groupId)
-        .limit(20)
-
-      if (adminError) {
-        console.warn('Admin query error (non-fatal):', adminError)
-      }
-
-      const adminIds = adminData?.map((admin: any) => admin.user_id) || []
-
-      // Combine all data
-      const usersMap = usersData?.reduce((acc: any, user: any) => {
-        acc[user.id] = user
-        return acc
-      }, {}) || {}
-
-      const membersWithDetails = basicMembers?.map((member: any) => {
-        const userDetails = usersMap[member.user_id]
-        if (!userDetails) {
-          console.warn(`User details not found for user_id: ${member.user_id}`)
-          return null
-        }
-        
-        return {
-          ...member,
-          users: {
-            name: userDetails.name || 'Unknown User',
-            email: userDetails.email || 'No email'
-          },
-          isAdmin: adminIds.includes(member.user_id)
-        }
-      }).filter(Boolean) || []
-
-      // Filter for ONLY guest users (those with temporary emails)
-      const guestMembers = membersWithDetails.filter((member: any) => 
-        member.users.email.includes('@temp.local')
-      )
-
-      console.log('Guest members found:', guestMembers)
-      setGuests(guestMembers)
+      const guestsData = await fetchGuestsAction(groupId)
+      setGuests(guestsData)
     } catch (error) {
       console.error('Error fetching guests:', error)
       setGuests([])
     } finally {
       setLoading(false)
     }
-  }, [groupId, supabase])
+  }, [groupId])
 
   useEffect(() => {
     // Only fetch guests if the user is an admin
@@ -157,32 +77,26 @@ export default function GuestPlayers({ groupId, isAdmin, currentUserId, groupOwn
 
         <div className="space-y-3">
           {guests.map((guest) => (
-            <div 
-              key={`${guest.group_id}-${guest.user_id}`} 
-              onClick={() => setSelectedUserId(guest.user_id)}
-              className="flex items-center justify-between p-3 border rounded-md hover:bg-orange-50 cursor-pointer transition-colors border-orange-200"
+            <div
+              key={guest.id}
+              onClick={() => setSelectedUserId(guest.id)}
+              className="p-4 hover:bg-gray-50 cursor-pointer transition-colors rounded-lg border border-gray-200"
             >
-              <div className="flex-1">
-                <div className="flex items-center gap-2">
-                  <h4 className="font-medium text-gray-900">{guest.users.name}</h4>
-                  <span className="px-2 py-0.5 text-xs bg-orange-100 text-orange-800 rounded-full">
-                    Guest
-                  </span>
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="font-medium text-gray-900">{guest.name}</h4>
+                  <div className="flex items-center gap-3 mt-1">
+                    <UserCircle className="w-4 h-4 text-gray-400" />
+                  </div>
                 </div>
-                <p className="text-sm text-gray-600">{guest.users.email}</p>
+                <p className="text-sm text-gray-600">{guest.email}</p>
                 <p className="text-xs text-gray-500">
-                  Added: {mounted ? new Date(guest.joined_at).toLocaleDateString('en-US', {
+                  Added: {mounted && guest.joinedAt ? new Date(guest.joinedAt).toLocaleDateString('en-US', {
+                    year: 'numeric',
                     month: 'short',
-                    day: 'numeric',
-                    year: 'numeric'
-                  }) : 'Loading...'}
+                    day: 'numeric'
+                  }) : '...'}
                 </p>
-              </div>
-
-              <div className="text-orange-400">
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                </svg>
               </div>
             </div>
           ))}

@@ -152,7 +152,6 @@ fastlane/screenshots
 *.sqlite
 *.sqlite3
 
-# Supabase
 .env.local
 .env.production
 .env.development
